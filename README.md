@@ -158,9 +158,9 @@ We recommend `zulip` or `Lark/Feishu` since they support rich group features.
 
 ## Acknowledgments
 
-- [THU-AIR](https://air.tsinghua.edu.cn/en/) team members.
-- [openclaw](https://github.com/openclaw/openclaw) and [ClawPhone](https://www.clawphone.app/) for the inspiration.
-- [OmniMind team](https://omnimind.com.cn/) for the inspiration and support.
-- [nanobot](https://github.com/HKUDS/nanobot) for the inspiration and open-sourced code of chat channel integration.
-- [zulip](https://mobilellm.zulip.com/) and [Feishu](https://www.feishu.cn/) for sponsored team account.
+- Incubated by [THU-AIR](https://air.tsinghua.edu.cn/en/) team.
+- Powered by [Mind Lab](https://macaron.im/mindlab/).
+- Inspired by [openclaw](https://github.com/openclaw/openclaw), [ClawPhone](https://www.clawphone.app/) and [nanobot](https://github.com/HKUDS/nanobot) .
+- Inspired and supported by [OmniMind team](https://omnimind.com.cn/).
+- Team accounts sponsored [zulip](https://mobilellm.zulip.com/) and [Feishu](https://www.feishu.cn/).
 
