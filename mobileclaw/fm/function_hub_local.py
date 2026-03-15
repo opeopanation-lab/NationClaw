@@ -71,10 +71,7 @@ class FunctionHubLocal(UniInterface):
 
         try:
             # Get temp directory from agent.file
-            temp_dir = self.agent.file.agent_temp_dir
-            if not temp_dir:
-                logger.warning("agent_temp_dir not available, skipping debug save")
-                return
+            temp_dir = os.path.join(self.agent.file.agent_temp_dir, 'debug_query')
 
             # Create temp directory if it doesn't exist
             os.makedirs(temp_dir, exist_ok=True)
@@ -805,7 +802,7 @@ The code will have access to:
 Note:
 - Do not include comments in the code.
 - One action at a time in your response.
-- If and only if no more action is needed, output a line `task_status = 'finished'/'failed'/'infeasible'` to indicate whether the task has been completed. If task_status is in the output, it should be the only line in the code.
+- If and only if no more action is needed, call `device.end_task('finished'/'failed'/'infeasible')` to end the task.
 
 """
 
@@ -874,22 +871,15 @@ Note:
         actions_and_results = params['actions_and_results']
         available_devices = params['available_devices']
         available_models = params['available_models']
-        available_files = params['available_files']
         additional_context = params.get('additional_context', [])  # Additional context from previous task executions
         recursion_depth = params.get('recursion_depth', 0)  # Current recursion depth
-        vars_preview = params.get('vars_preview', {})  # Dict mapping var names to preview strings
-        knowledge = params.get('knowledge', '')  # Useful knowledge for doing the task
         mode = params.get('mode', 'normal')  # Execution mode: 'normal' or 'fast'
+        media_content_parts = params.get('media_content_parts', [])  # Pre-built media content parts from agent.py
+        available_skills = params.get('available_skills', '')  # Available skills listing
 
-        # Extract text and medias using utility function
-        actions_text, actions_medias = self._extract_text_and_medias(actions_and_results)
-        additional_context_text, additional_context_medias = self._extract_text_and_medias(additional_context)
-
-        # Format vars preview for display
-        if vars_preview:
-            vars_text = '\n\n'.join([f"{var_name}: {preview}" for var_name, preview in vars_preview.items()])
-        else:
-            vars_text = '(No other variables defined yet)'
+        # Extract text only (medias are handled by agent.py via media_content_parts)
+        actions_text, _ = self._extract_text_and_medias(actions_and_results)
+        additional_context_text, _ = self._extract_text_and_medias(additional_context)
 
         # Format available devices
         if available_devices:
@@ -903,11 +893,9 @@ Note:
         else:
             models_text = '(No models configured)'
 
-        # Format available files (working directory structure)
-        if available_files:
-            files_text = available_files
-        else:
-            files_text = '(No working directory structure available)'
+        # Format available skills
+        skills_text = available_skills  # Already a formatted string from list_skills()
+
 
         # Mode-specific instructions
         mode_instruction = ""
@@ -937,10 +925,10 @@ Note:
   - `agent.send_message(message, receiver=None, channel=None)`: send a message to the `receiver` via `channel`. `message` can be a string, an image/file (represented as file path). `receiver` is the name/id. `receiver=None, channel=None` means sending to the manager. This API is used for sending messages through internal channels.
 
 - AI model calling
-  - `agent.query_model(params, model_name=None)`: query the foundation model. `query_params` is a list of query parameters (text, image, etc.). `model_name` specifies the preferred model to use in this query. The avaliable models can be found in `Available Models` section. This function returns the model response as a list of text and images.
+  - `agent.query_model(params, model_name=None)`: query the foundation model. `params` is a list of query parameters (text, image, etc.). `model_name` specifies the preferred model to use in this query. The available models can be found in `Available Models` section.
 
 - File/memory operations for text (markdown) files. Use these APIs to fetch and maintain knowledge/memory before and after each task. When creating new files, make sure the new file is created under the agent's personal dir:
-  - `agent.file.read(file_path, line_start, line_end)`: read the working directory file from line range [line_start, line_end]. For example, [0, 10] means the first 11 lines and [-10, -1] means the last 10 lines.
+  - `agent.file.read(file_path, line_start, line_end)`: read the working directory file from line range [line_start, line_end] into the context. For example, [0, 10] means the first 11 lines and [-10, -1] means the last 10 lines.
   - `agent.file.search(file_or_dir_path, text, line_limit=100)`: search the working directory file(s) for given text. It will return the matched files and text lines.
   - `agent.file.write(file_path, content)`: write content to a working directory file. If the file doesn't exist, it will be created.
   - `agent.file.append(file_path, content)`: append content to the end of a working directory file. If the file doesn't exist, it will be created.
@@ -949,19 +937,22 @@ Note:
 - File operations for general (non-markdown) files:
   - `agent.file.parse_file(file_path)`: parse a file to model-readable format. Supports various formats (doc, pdf, xlsx, pptx, etc.). Returns the parsed file content as a list of text and images.
   - `agent.file.generate_file(file_path, requirement, materials)`: generate a new file for human use based on given materials. `requirement` is text description of the file to generate. `materials` is a list of text and images.
+  - `agent.read_image(image_path)`: read an image file and include it in the next step's context.
 
-- Note-taking and result recording
+- Note-taking
   - `agent.take_note(text)`: Record a text note about task progress. Use this for useful information that helps with future steps.
-  - `agent.record_result(content)`: Record a text paragraph to the task results. Use this for results relevant to the task goal. Only the recorded content and files will be returned to the task caller.
-  - `agent.record_result_file(file_path)`: Record a file to the task results."""
+
+- Task control
+  - `agent.end_task(status)`: End the current task. `status` must be 'finished', 'failed', or 'infeasible'."""
 
         if mode in ['normal']:
             api_docs = """
 - Device use
-  - `agent.do_with_device(task, knowledge, device)`: Execute a task on a device (phone/browser/desktop/...). `task` is a natural language description of what to do. `knowledge` is an optional text paragraph that may be useful for executing this task. `device` is the name/id of an available device. The avaliable devices can be found in `Available Devices` section. This function returns the information collected during task execution, which is a list of text and images.
+  - `agent.get_device_screen(device)`: get the current screen of a device. The screenshot will be included in the next step's context. Make sure to call this first when starting a device-use session.
+  - `agent.do_with_device(task, device)`: Execute a subtask on a device (phone/browser/...) based on the current screen. `task` is a natural language description of what to do based on current screen (should be a simple task with less than 5 interactions). `device` is the name/id of an available device. The available devices can be found in `Available Devices` section.
 
 - Task decomposition
-  - `agent.execute_task(task, knowledge)`: Execute a subtask (for breaking down complex tasks into smaller ones). `knowledge` is an optional text paragraph that may be useful for executing this task.
+  - `agent.execute_task(task)`: Execute a subtask (for breaking down complex tasks into smaller ones).
 """ + api_docs
 
         # Build prompt
@@ -969,20 +960,20 @@ Note:
 
 # Overall guideline
 
-The task execution process follows an iterative manner. The agent generates a step (represented as a small piece of Python program) based on the current situation, execute the step, observe the results, and decide the next steps. Each step should be one or few minimal actions that you are certain about based on the current situation.
+The task execution process follows an iterative IPython-style manner. The agent generates a step (represented as a small piece of Python program) based on the current situation, execute the step, observe the results, and decide the next steps. Each step should be one or few minimal actions that you are certain about based on the current situation.
 
-The actions in each step are represented as Python program based on a set of domain-specific APIs designed for device use, LLM calling, user interaction, file operations, etc. Each step should be one action only.
+The actions in each step are represented as Python program based on standard python and a set of domain-specific commands (DSC) designed for device use, LLM calling, user interaction, file operations, etc. Each step must call exactly one `agent.*` domain-specific command.
 
-If the task does not clearly specify what to do. Try generating a specific task based on profile jobs or system jobs.
+If the task does not clearly specify what to do. Try generating a specific task based on profile or system jobs.
 
 ## System Jobs
 
-- If there is any missing information (marked with "?") in profile, ask the manager to complete them.
+- If there is any missing information (marked with "?") in the profile, ask the manager to complete them.
 - Analyze pending tasks in memory and complete them if it is an appropriate time. The user-requested pending tasks have higher priority than routine system/profile jobs.
 - Every day before other tasks, summarize yesterday's memory and save important information into long-term memory.
-- Compress the long-term memory or the daily memory if it is too long (e.g. >1000 words).
+- Compress the long-term memory or the daily memory by summarizing and deduplicating if it is too long (e.g. >1000 words).
 
-## Domain-Specific APIs
+## Domain-Specific Commands
 {api_docs}
 
 ## Available Devices
@@ -991,12 +982,16 @@ If the task does not clearly specify what to do. Try generating a specific task 
 ## Available Models
 {models_text}
 
-## Available Files
-The agent has access to a working directory with the following structure:
-```
-{files_text}
-```
+"""
+        # Conditionally add skills section
+        if skills_text:
+            prompt += f"""
+## Available Skills
+The following skills provide domain-specific knowledge and procedures. Read the skill file with `agent.file.read()` when the task matches a skill's topic.
+{skills_text}
+"""
 
+        prompt += f"""
 # The Current Task
 
 ## Agent Information
@@ -1007,42 +1002,27 @@ The agent has access to a working directory with the following structure:
 
 {mode_instruction}
 
-## Task-related Knowledge
-{knowledge if knowledge else '(No specific knowledge provided)'}
-
 ## Previous Actions and Results
 {actions_text if actions_text else '(No previous actions)'}
 
-## Current Variables
-```
-{vars_text}
-```
-
 ## Your Response
 
-You need to decide the next action to take toward completing the task. You need to understand what and how to do (avoid duplicated tasks) based on memory, knowledge and action history.
-Your response should be a brief paragraph (<50 words, prefixed with "Thought:") describing what you plan to do next, followed by Python code that executes the action.
+You need to decide the next action to take toward completing the task. You need to understand what and how to do (avoid duplicated tasks) based on memory and action history.
+Your response should be a brief paragraph (<50 words, prefixed with "Thought:") describing what you plan to do, followed by Python code that executes the plan.
 
-The code will have access to:
-- `agent`: The agent object with domain-specific APIs
-- `vars`: A dict containing previous created variables. You can use the vars as API params.
-
-Note: 
+Note:
 - Do not include comments in the code.
-- Output only one action in your response.
-- If and only if no more action is needed, output a line `task_status = 'finished'/'failed'/'infeasible'` to indicate whether the task has been completed. If task_status is in the output, it should be the only line in the code.
+- Each step must call exactly one `agent.*` command. Do not assign return values to variables — all return values are automatically captured in the action history.
+- If and only if no more action is needed, call `agent.end_task('finished'/'failed'/'infeasible')` to end the task.
+- Only the most recent images are included in context. To view older images referenced in the action history, use `agent.read_image(image_path)`.
 
 """
-        # Collect medias
-        medias = []
-        medias.extend(actions_medias)
-        medias.extend(additional_context_medias)
-
         # Build messages
-        content_parts = [{"type": "text", "text": prompt}]
-        media_content_parts = self._organize_medias_as_content_parts(medias)
+        content_parts = []
+        # Append pre-built media content parts (FIFO-limited by agent.py)
         if media_content_parts:
             content_parts.extend(media_content_parts)
+        content_parts = [{"type": "text", "text": prompt}]
 
         messages = [{"role": "user", "content": content_parts}]
 

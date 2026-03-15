@@ -81,6 +81,9 @@ class DeviceControllerBase(UniInterface):
         logger.info(f"🚀 Starting device task: {task}")
         self.agent._log_and_report(f'Start device task: {task}', actions_and_results, task_tag=task_tag)
 
+        # Create DeviceAPI instance for execution (persists across steps for task_status tracking)
+        device_api = self._create_device_api_for_execution(notes, results, actions_and_results)
+
         for step in range(max_steps):
             # Pause if a message is being handled
             if hasattr(self.agent, '_message_pause_event'):
@@ -147,9 +150,6 @@ class DeviceControllerBase(UniInterface):
 
             # Execute the code
             try:
-                # Create DeviceAPI instance for execution with notes, results, and actions_and_results
-                device_api = self._create_device_api_for_execution(notes, results, actions_and_results)
-
                 # Create execution environment
                 exec_globals = {
                     'device': device_api,
@@ -158,11 +158,10 @@ class DeviceControllerBase(UniInterface):
                 # Execute the generated code
                 exec(code, exec_globals)
 
-                # Check task status
-                task_status = exec_globals.get('task_status', 'ongoing')
-                if task_status != 'ongoing':
-                    logger.info(f"✅ Task status: {task_status}")
-                    self.agent._log_and_report(f'Task status: {task_status}', actions_and_results, task_tag=task_tag)
+                # Check task status from device API
+                if device_api._task_status != 'ongoing':
+                    logger.info(f"✅ Task status: {device_api._task_status}")
+                    self.agent._log_and_report(f'Task status: {device_api._task_status}', actions_and_results, task_tag=task_tag)
                     break
 
             except Exception as e:
@@ -174,7 +173,7 @@ class DeviceControllerBase(UniInterface):
 
             # Sleep between steps
             self.agent.sleep(0.5)
-        if step + 1 >= max_steps and task_status == 'ongoing':
+        if step + 1 >= max_steps and device_api._task_status == 'ongoing':
             self.agent._log_and_report(f'[WARNING] Task stopped due to step limit: {max_steps}. You may need to start a new task to complete the remaining work.', actions_and_results, task_tag=task_tag)
         # self.agent._conclude_task(f'(With device {self.device_name}) {task}', actions_and_results=actions_and_results)
         return results
@@ -196,6 +195,17 @@ class DeviceControllerBase(UniInterface):
                 self._notes = notes
                 self._results = results
                 self._actions_and_results = actions_and_results
+                self._task_status = 'ongoing'
+
+            def end_task(self, status):
+                """End the current task with a status.
+
+                Args:
+                    status: 'finished', 'failed', or 'infeasible'
+                """
+                if status not in ('finished', 'failed', 'infeasible'):
+                    raise ValueError(f"Invalid task status: {status}. Must be 'finished', 'failed', or 'infeasible'.")
+                self._task_status = status
 
             # Common device actions
             def click(self, x, y):

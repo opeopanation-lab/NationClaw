@@ -36,6 +36,7 @@ class File_Interface(UniInterface):
         self.agent_log_dir = os.path.join(self.agent_dir, '_logs')
         self.agent_memory_dir = os.path.join(self.agent_dir, 'daily_memory')
         self.agent_profile_path = os.path.join(self.agent_dir, 'profile.md')
+        self.agent_skills_dir = os.path.join(self.agent_dir, 'skills')
         self._tag = 'file'
         # Cache for embeddings: {file_path: (mtime, embedding)}
         self._embedding_cache = {}
@@ -195,9 +196,8 @@ class File_Interface(UniInterface):
         Check if the current member has permission to perform the operation on the file.
 
         Permission rules:
-        - All members can read the whole directory
-        - Members with "manager" permission can write org_shared/files and org_shared/knowledge
-        - Normal members can only write their own directory
+        - All members can read files under org_dir
+        - All members can read/write files under their own agent_dir (except log files)
         - No one should write log files (maintained automatically)
 
         :param file_path: Relative or absolute file path
@@ -206,30 +206,27 @@ class File_Interface(UniInterface):
         """
         # Normalize file path
         if not os.path.isabs(file_path):
-            file_path = os.path.join(self.org_dir, file_path)
+            file_path = os.path.join(self.agent_dir, file_path)
 
-        rel_path = os.path.relpath(file_path, self.org_dir)
+        abs_path = os.path.realpath(file_path)
+        agent_dir_real = os.path.realpath(self.agent_dir)
+        org_dir_real = os.path.realpath(self.org_dir)
 
-        # All members can read
+        is_under_agent_dir = abs_path.startswith(agent_dir_real + os.sep) or abs_path == agent_dir_real
+        is_under_org_dir = abs_path.startswith(org_dir_real + os.sep) or abs_path == org_dir_real
+
+        # Read: allow anything under org_dir
         if operation == 'read':
-            return True
+            return is_under_org_dir
 
-        if rel_path.endswith('log.md') or '/_logs/' in rel_path:
-            return False
-
-        # Check write permissions
+        # Write: only allow under agent_dir, excluding log files
         if operation == 'write':
-            # Managers can write to org_shared/files and org_shared/knowledge
-            if self.agent_permission == 'manager':
-                if rel_path.startswith('org_shared/files') or rel_path.startswith('org_shared/knowledge'):
-                    return True
-
-            # All members can write to their own directory
-            if rel_path.startswith(f'{self.agent_file_name}/'):
-                return True
-
-            # Otherwise, no permission
-            return False
+            if not is_under_agent_dir:
+                return False
+            rel_path = os.path.relpath(abs_path, agent_dir_real)
+            if rel_path.startswith('_logs') or rel_path.endswith('log.md'):
+                return False
+            return True
 
         return False
 
@@ -361,7 +358,7 @@ class File_Interface(UniInterface):
 
         # Normalize file path
         if not os.path.isabs(file_path):
-            file_path = os.path.join(self.org_dir, file_path)
+            file_path = os.path.join(self.agent_dir, file_path)
 
         mem_file = TextFile(file_path)
         lines = mem_file.read(line_start, line_end)
@@ -398,7 +395,7 @@ class File_Interface(UniInterface):
 
         # Normalize path
         if not os.path.isabs(file_or_dir_path):
-            search_path = os.path.join(self.org_dir, file_or_dir_path)
+            search_path = os.path.join(self.agent_dir, file_or_dir_path)
         else:
             search_path = file_or_dir_path
 
@@ -406,7 +403,7 @@ class File_Interface(UniInterface):
             # Search in single file
             mem_file = TextFile(search_path)
             file_matches = mem_file.find(text)
-            rel_path = os.path.relpath(search_path, self.org_dir)
+            rel_path = os.path.relpath(search_path, self.agent_dir)
 
             # Limit the number of lines
             file_matches = file_matches[:line_limit]
@@ -425,7 +422,7 @@ class File_Interface(UniInterface):
                         file_path = os.path.join(root, file)
                         mem_file = TextFile(file_path)
                         file_matches = mem_file.find(text)
-                        rel_path = os.path.relpath(file_path, self.org_dir)
+                        rel_path = os.path.relpath(file_path, self.agent_dir)
 
                         # Limit the number of lines per file
                         file_matches = file_matches[:line_limit]
@@ -463,7 +460,7 @@ class File_Interface(UniInterface):
 
         # Normalize path
         if not os.path.isabs(file_or_dir_path):
-            search_path = os.path.join(self.org_dir, file_or_dir_path)
+            search_path = os.path.join(self.agent_dir, file_or_dir_path)
         else:
             search_path = file_or_dir_path
 
@@ -557,7 +554,7 @@ class File_Interface(UniInterface):
         # Format results
         result_list = []
         for file_path, similarity, lines in top_results:
-            rel_path = os.path.relpath(file_path, self.org_dir)
+            rel_path = os.path.relpath(file_path, self.agent_dir)
 
             # Limit the number of lines
             lines = lines[:line_limit]
@@ -588,7 +585,7 @@ class File_Interface(UniInterface):
 
         # Normalize file path
         if not os.path.isabs(file_path):
-            file_path = os.path.join(self.org_dir, file_path)
+            file_path = os.path.join(self.agent_dir, file_path)
 
         lock = self._get_file_lock(file_path)
         with lock:
@@ -621,7 +618,7 @@ class File_Interface(UniInterface):
 
         # Normalize file path
         if not os.path.isabs(file_path):
-            file_path = os.path.join(self.org_dir, file_path)
+            file_path = os.path.join(self.agent_dir, file_path)
 
         lock = self._get_file_lock(file_path)
         with lock:
@@ -652,7 +649,7 @@ class File_Interface(UniInterface):
 
         # Normalize file path
         if not os.path.isabs(file_path):
-            file_path = os.path.join(self.org_dir, file_path)
+            file_path = os.path.join(self.agent_dir, file_path)
 
         lock = self._get_file_lock(file_path)
         with lock:
@@ -683,7 +680,7 @@ class File_Interface(UniInterface):
 
         # Normalize file path
         if not os.path.isabs(file_path):
-            file_path = os.path.join(self.org_dir, file_path)
+            file_path = os.path.join(self.agent_dir, file_path)
 
         lock = self._get_file_lock(file_path)
         with lock:
@@ -720,7 +717,7 @@ class File_Interface(UniInterface):
 
         # Normalize file path
         if not os.path.isabs(file_path):
-            file_path = os.path.join(self.org_dir, file_path)
+            file_path = os.path.join(self.agent_dir, file_path)
 
         lock = self._get_file_lock(file_path)
         with lock:
@@ -755,7 +752,7 @@ class File_Interface(UniInterface):
 
         # Normalize file path
         if not os.path.isabs(file_path):
-            file_path = os.path.join(self.org_dir, file_path)
+            file_path = os.path.join(self.agent_dir, file_path)
 
         lock = self._get_file_lock(file_path)
         with lock:
@@ -801,6 +798,46 @@ class File_Interface(UniInterface):
             logger = structlog.get_logger(__name__)
             logger.error(f"Error parsing file {file_path}: {e}")
             return [f"Error parsing file: {str(e)}"]
+
+    def list_skills(self):
+        """
+        List all skills in the agent's skills directory.
+        Each skill is a subdirectory under agent_skills_dir containing a SKILL.md file.
+        Returns a formatted string with skill file paths and short descriptions
+        (first non-empty line of SKILL.md, truncated to 80 chars).
+
+        Returns:
+            str: Formatted skill listing, or empty string if no skills found.
+        """
+        if not os.path.isdir(self.agent_skills_dir):
+            return ''
+
+        lines = []
+        for entry in sorted(os.listdir(self.agent_skills_dir)):
+            skill_dir = os.path.join(self.agent_skills_dir, entry)
+            if not os.path.isdir(skill_dir):
+                continue
+            skill_file = os.path.join(skill_dir, 'SKILL.md')
+            if not os.path.isfile(skill_file):
+                continue
+            # Get short description from first non-empty line
+            description = ''
+            try:
+                with open(skill_file, 'r', encoding='utf-8') as f:
+                    for line in f:
+                        stripped = line.strip()
+                        if stripped:
+                            if len(stripped) > 80:
+                                description = stripped[:80] + '...'
+                            else:
+                                description = stripped
+                            break
+            except Exception:
+                pass
+            rel_path = os.path.relpath(skill_file, self.agent_dir)
+            lines.append(f"- {rel_path} \t{description}")
+
+        return '\n'.join(lines)
 
     def generate_file(self, file_path: str, requirement: str, materials):
         """
