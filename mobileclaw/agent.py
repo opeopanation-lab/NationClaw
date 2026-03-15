@@ -4,6 +4,8 @@ import copy
 import queue
 import threading
 import random
+import traceback
+from datetime import datetime
 
 import structlog
 from typing import cast, Callable, Iterable, Any
@@ -175,13 +177,12 @@ class AutoAgent:
                 longterm_memory_content = f.read()
 
         # Get relative paths for display
-        profile_path_rel = os.path.relpath(profile_path, self.file.org_dir)
-        memory_path_today_rel = os.path.relpath(memory_path_today, self.file.org_dir)
-        longterm_memory_path_rel = os.path.relpath(longterm_memory_path, self.file.org_dir)
+        profile_path_rel = os.path.relpath(profile_path, self.file.agent_dir)
+        memory_path_today_rel = os.path.relpath(memory_path_today, self.file.agent_dir)
+        longterm_memory_path_rel = os.path.relpath(longterm_memory_path, self.file.agent_dir)
 
         agent_info = f"""
 - Current Time: {current_time}
-- Organization: {self.org_name}
 - Agent Name: {self.name}
 - Agent Permission: {self.permission}
 - Agent Profile ({profile_path_rel}):
@@ -210,14 +211,13 @@ class AutoAgent:
             return (None, [])
         return self._current_task_stack[-1]  # Return the top of the stack
 
-    def execute_task(self, task, knowledge='', actions_and_results=[], max_steps=30, _recursion_depth=0, mode='normal'):
+    def execute_task(self, task, actions_and_results=[], max_steps=30, _recursion_depth=0, mode='normal'):
         """
         Let the agent execute a task
         The execution process is a loop. At each step, let the model decide what actions to take next.
 
         Args:
             task: Task description
-            knowledge: Useful knowledge for doing the task
             max_steps: Maximum number of steps to execute
             _recursion_depth: Internal parameter to track recursion depth (max 3 levels)
             mode: Execution mode. Supported modes:
@@ -243,8 +243,8 @@ class AutoAgent:
         available_devices = self.device_manager.get_available_devices()
         available_models = self.fm.get_available_models()
 
-        # Get working directory structure
-        available_files = self._get_working_dir_tree()
+        # Get available skills
+        available_skills = self.file.list_skills()
 
         # Initialize execution state
         actions_and_results = actions_and_results
@@ -255,36 +255,33 @@ class AutoAgent:
         self._current_task_stack.append((task, actions_and_results))
 
         try:
-            # Initialize vars dict that persists across steps
-            current_vars = {'actions_and_results': actions_and_results}
-            agent_api = self._create_agent_api_for_execution(_recursion_depth, mode)
+            agent_api = self._create_agent_api_for_execution(actions_and_results, _recursion_depth, mode, task_tag, indent)
 
-            # Track if task is idle (finished in step 0 with only task_status set)
+            # Track if task is idle (finished in step 0 with only end_task called)
             finished_step = -1
-            task_status = 'ongoing'
 
             for step in range(max_steps):
                 # Pause normal tasks if a message is being handled
                 if mode == 'normal':
                     self._message_pause_event.wait()
 
-                # Create vars preview for display in prompt
-                vars_preview = self._create_vars_preview(current_vars)
-
                 if len(actions_and_results) > self.actions_and_results_max_len:
                     actions_and_results = actions_and_results[-self.actions_and_results_max_len:]
+
+                # Extract and limit medias from actions_and_results for the prompt
+                media_content_parts = self._build_media_content_parts(actions_and_results)
+
                 # Prepare params for task_step
                 params = {
                     'task': task,
+                    'mode': mode,
                     'agent_info': agent_info,
                     'actions_and_results': actions_and_results,
                     'available_devices': available_devices,
                     'available_models': available_models,
-                    'available_files': available_files,
+                    'available_skills': available_skills,
                     'recursion_depth': _recursion_depth,
-                    'vars_preview': vars_preview,
-                    'knowledge': knowledge,
-                    'mode': mode
+                    'media_content_parts': media_content_parts,
                 }
 
                 # Call model to generate step code
@@ -296,47 +293,36 @@ class AutoAgent:
 
                 # Stop if no code generated
                 if not code:
-                    self._log_and_report(f'{indent}Step {step} Warning: No code parsed from the response. Perhaps forgot to wrap code in code block?', actions_and_results, task_tag)
+                    self._log_and_report(f'{indent}Step {step} Action: (WARNING - no code parsed)', actions_and_results, task_tag)
                     continue
 
-                self._log_and_report(f'{indent}Step {step} Action:\n```\n{code}\n```', actions_and_results, task_tag)
-                logger.info(f"{indent}Step {step} Action:\n{code}")
+                code_line = f'{indent}Step {step} Action:\n```\n{code}\n```'
+                self._log_and_report(code_line, actions_and_results, task_tag)
 
                 # Execute the code
                 try:
-                    # Update vars dict with current actions_and_results
-                    current_vars['actions_and_results'] = actions_and_results
+                    # Reset call count and set current step for output logging
+                    agent_api._call_count = 0
+                    agent_api._current_step = step
 
-                    # Pass vars dict to the code
-                    exec_globals = {
-                        'agent': agent_api,
-                        'vars': current_vars,
-                        'task_status': task_status
-                    }
+                    exec_globals = {'agent': agent_api}
                     exec(code, exec_globals)
 
-                    # Update current_vars with any new variables created in the code
-                    for key, value in exec_globals.items():
-                        if key not in ['agent', 'task_status', '__builtins__', 'vars']:
-                            current_vars[key] = value
-
-                    task_status = exec_globals.get('task_status', task_status)
-                    if task_status != 'ongoing':
-                        if task_status == 'finished':
+                    # Check task status from agent API
+                    if agent_api._task_status != 'ongoing':
+                        if agent_api._task_status == 'finished':
                             finished_step = step
                         break
 
                 except Exception as e:
-                    err_msg = f"{indent}Error: step {step} was failed: {e}"
+                    err_msg = f"{indent}Step {step} Output: Error: {e}"
                     logger.error(err_msg)
+                    traceback.print_exc()
                     self._log_and_report(err_msg, actions_and_results, task_tag)
-                    continue # NOTE: decide between break or continue
-            
-            if step + 1 >= max_steps and task_status != 'finished':
-                self.agent._log_and_report(f'[WARNING] Task stopped due to step limit: {max_steps}. You may need to start a new task to complete the remaining work.', actions_and_results, task_tag=task_tag)
+                    continue
 
-            # Get results before concluding
-            results = agent_api._results
+            if step + 1 >= max_steps and agent_api._task_status != 'finished':
+                self._log_and_report(f'[WARNING] Task stopped due to step limit: {max_steps}. You may need to start a new task to complete the remaining work.', actions_and_results, task_tag=task_tag)
 
             # Determine whether it is an idle task (finished within 1 step, no action executed)
             idle_flag = False
@@ -350,10 +336,10 @@ class AutoAgent:
                     self._idle_task_count = 0  # Reset counter on non-idle task
 
             # Conclude task by saving useful information (only for normal mode)
-            if mode == 'normal' and not idle_flag: # and _recursion_depth == 0:
+            if mode == 'normal' and not idle_flag:
                 self._conclude_task(task, actions_and_results, _recursion_depth=_recursion_depth)
 
-            return results
+            return actions_and_results
         finally:
             # Pop task from stack
             if self._current_task_stack and self._current_task_stack[-1][0] == task:
@@ -468,6 +454,46 @@ Task: {current_task}
         if hasattr(self, 'file') and self.file:
             return self.file.get_working_dir_tree(show_non_markdown)
         return "(File interface not initialized)"
+
+    def _build_media_content_parts(self, actions_and_results, max_images=5):
+        """Extract image tuples from actions_and_results, keep only the last max_images,
+        and convert them to API content parts.
+
+        Args:
+            actions_and_results: List of text strings and image tuples (path, base64)
+            max_images: Maximum number of images to include in the prompt (FIFO)
+
+        Returns:
+            list: Content parts suitable for appending to API messages
+        """
+        # Collect all image tuples
+        all_medias = []
+        for item in actions_and_results:
+            if isinstance(item, tuple) and len(item) == 2:
+                all_medias.append(item)
+
+        # Keep only the last N images (FIFO)
+        limited_medias = all_medias[-max_images:] if len(all_medias) > max_images else all_medias
+
+        # Convert to content parts
+        content_parts = []
+        for media_path, media_base64 in limited_medias:
+            try:
+                if media_base64:
+                    if media_path:
+                        content_parts.append({
+                            "type": "text",
+                            "text": f"[Image: {media_path}]"
+                        })
+                    content_parts.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{media_base64}"
+                        }
+                    })
+            except Exception as e:
+                logger.warning(f"Failed to process image: {e}")
+        return content_parts
 
     def _create_vars_preview(self, vars_dict: dict, str_preview_len: int = 500, collection_preview_len: int = 100, preview_threshold: int = 10000) -> dict:
         """Create preview strings for variables to be displayed in prompts.
@@ -700,14 +726,13 @@ Task: {current_task}
     # ==================== Domain-Specific APIs for Task Execution ====================
     # These APIs are used in generated Python code for task execution
 
-    def do_with_device(self, task, knowledge='', device=None):
+    def do_with_device(self, task, device=None):
         """
         Execute a task on a device.
         # TODO pass exception to caller
 
         Args:
             task: Natural language description of what to do
-            knowledge: Useful knowledge for doing the task
             device: The name/id of an available device
 
         Returns:
@@ -719,8 +744,7 @@ Task: {current_task}
             return [f"Error: Device '{device}' not found"]
 
         try:
-            # Use device.execute_task to execute the instruction with knowledge
-            results = device_obj.execute_task(task, knowledge=knowledge)
+            results = device_obj.execute_task(task)
             return results
         except Exception as e:
             logger.error(f"Error executing instruction on device: {e}")
@@ -756,149 +780,276 @@ Task: {current_task}
             logger.error(f"Error querying model: {e}")
             return [f"Error: {str(e)}"]
 
-    def _create_agent_api_for_execution(self, recursion_depth=0, mode='normal'):
+    def _create_agent_api_for_execution(self, actions_and_results, recursion_depth=0, mode='normal', task_tag='📋', indent=''):
         """
         Create an agent API object for task execution.
         Similar to MemoryAPI in memory system.
 
         Args:
+            actions_and_results: The shared actions_and_results list for capturing results
             recursion_depth: Current recursion depth for nested tasks
             mode: Execution mode ('normal', 'handle_message', 'conclude_task')
+            task_tag: Emoji tag for logging
+            indent: Indentation prefix for subtasks
         """
         class FileAPI:
             """File operations API for task execution."""
-            def __init__(self, file_interface):
+            def __init__(self, file_interface, agent_api):
                 self._file = file_interface
+                self._agent_api = agent_api
+
+            def _check_and_count(self):
+                self._agent_api._check_call_count()
 
             def read(self, file_path, line_start, line_end):
-                return self._file.read(file_path, line_start, line_end)
+                self._check_and_count()
+                result = self._file.read(file_path, line_start, line_end)
+                self._agent_api._capture_result('file.read', result)
+                return result
 
             def search(self, file_or_dir_path, text, line_limit=100):
-                return self._file.search(file_or_dir_path, text, line_limit)
+                self._check_and_count()
+                result = self._file.search(file_or_dir_path, text, line_limit)
+                self._agent_api._capture_result('file.search', result)
+                return result
 
             def write(self, file_path, content):
-                return self._file.write(file_path, content)
+                self._check_and_count()
+                result = self._file.write(file_path, content)
+                self._agent_api._capture_result('file.write', result)
+                return result
 
             def append(self, file_path, content):
-                return self._file.append(file_path, content)
+                self._check_and_count()
+                result = self._file.append(file_path, content)
+                self._agent_api._capture_result('file.append', result)
+                return result
 
             def insert(self, file_path, insert_line, content):
-                return self._file.insert(file_path, insert_line, content)
+                self._check_and_count()
+                result = self._file.insert(file_path, insert_line, content)
+                self._agent_api._capture_result('file.insert', result)
+                return result
 
             def replace(self, file_path, match_text, replace_text):
-                return self._file.replace(file_path, match_text, replace_text)
+                self._check_and_count()
+                result = self._file.replace(file_path, match_text, replace_text)
+                self._agent_api._capture_result('file.replace', result)
+                return result
 
             def delete(self, file_path):
-                return self._file.delete(file_path)
+                self._check_and_count()
+                result = self._file.delete(file_path)
+                self._agent_api._capture_result('file.delete', result)
+                return result
 
             def remove_lines(self, file_path, line_start, line_end):
-                return self._file.remove_lines(file_path, line_start, line_end)
+                self._check_and_count()
+                result = self._file.remove_lines(file_path, line_start, line_end)
+                self._agent_api._capture_result('file.remove_lines', result)
+                return result
 
             def parse_file(self, file_path):
-                return self._file.parse_file(file_path)
+                self._check_and_count()
+                result = self._file.parse_file(file_path)
+                self._agent_api._capture_result('file.parse_file', result)
+                return result
 
             def generate_file(self, file_path, requirement, materials):
-                return self._file.generate_file(file_path, requirement, materials)
+                self._check_and_count()
+                result = self._file.generate_file(file_path, requirement, materials)
+                self._agent_api._capture_result('file.generate_file', result)
+                return result
 
         class AgentAPI:
-            def __init__(self, agent, recursion_depth, mode):
+            RESULT_MAX_INLINE_LEN = 3000
+            RESULT_BRIEF_LEN = 1000
+
+            def __init__(self, agent, actions_and_results, recursion_depth, mode, task_tag, indent):
                 self._agent = agent
+                self._actions_and_results = actions_and_results
                 self._recursion_depth = recursion_depth
                 self._mode = mode
-                self._notes = []  # Store notes for task progress
-                self._results = []  # Store task results
-                # Expose file operations through agent.file
-                self.file = FileAPI(agent.file)
+                self._task_tag = task_tag
+                self._indent = indent
+                self._task_status = 'ongoing'
+                self._call_count = 0
+                self._current_step = 0
+                self.file = FileAPI(agent.file, self)
 
-            def do_with_device(self, task, knowledge='', device=None):
-                # Check if mode allows device operations
+            def _check_call_count(self):
+                self._call_count += 1
+                if self._call_count > 1:
+                    raise Exception("Only one agent command per step is allowed. Please split into multiple steps.")
+
+            def _log_output(self, content):
+                """Log output using the unified _log_and_report with Step N Output prefix."""
+                if isinstance(content, tuple) and len(content) == 2:
+                    # Image tuple — append the image into the list
+                    text = f"{self._indent}Step {self._current_step} Output: {content[0]}"
+                    self._agent._log_and_report(text, self._actions_and_results, self._task_tag)
+                    self._actions_and_results.append(content)
+                else:
+                    text = f"{self._indent}Step {self._current_step} Output: {content}"
+                    self._agent._log_and_report(text, self._actions_and_results, self._task_tag)
+
+            def _capture_result(self, api_name, result):
+                """Capture API return value into actions_and_results via _log_output."""
+                if result is None:
+                    self._log_output(f"{api_name} returned")
+                    return
+
+                # Handle list results that may contain image tuples
+                if isinstance(result, list):
+                    text_parts = []
+                    for item in result:
+                        if isinstance(item, tuple) and len(item) == 2:
+                            self._log_output(item)
+                        elif isinstance(item, str):
+                            text_parts.append(item)
+                    if text_parts:
+                        combined = '\n'.join(text_parts)
+                        self._capture_text_result(api_name, combined)
+                    return
+
+                self._capture_text_result(api_name, result)
+
+            def _capture_text_result(self, api_name, result):
+                """Capture a text result, saving to temp file if too large."""
+                result_str = str(result)
+                if len(result_str) <= self.RESULT_MAX_INLINE_LEN:
+                    self._log_output(f"{api_name} returned:\n{result_str}")
+                else:
+                    # Save to temp file
+                    try:
+                        temp_dir = self._agent.file.agent_temp_dir
+                        os.makedirs(temp_dir, exist_ok=True)
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                        filename = f"result_{api_name}_{timestamp}.md"
+                        filepath = os.path.join(temp_dir, filename)
+                        with open(filepath, 'w', encoding='utf-8') as f:
+                            f.write(result_str)
+                        brief = result_str[:self.RESULT_BRIEF_LEN]
+                        rel_path = os.path.relpath(filepath, self._agent.file.agent_dir)
+                        self._log_output(
+                            f"{api_name} returned (full content saved to {rel_path}):\n{brief}..."
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to save result to temp file: {e}")
+                        self._log_output(f"{api_name} returned (truncated):\n{result_str[:self.RESULT_BRIEF_LEN]}...")
+
+            def _save_screenshot(self, screenshot, label='screenshot'):
+                """Save a screenshot to _temp/screenshots/ and append image tuple to actions_and_results."""
+                import base64
+                from io import BytesIO
+                buf = BytesIO()
+                screenshot.save(buf, format='PNG')
+                base64_str = base64.b64encode(buf.getvalue()).decode('utf-8')
+                # Save to file
+                try:
+                    screenshots_dir = os.path.join(self._agent.file.agent_temp_dir, 'screenshots')
+                    os.makedirs(screenshots_dir, exist_ok=True)
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                    filename = f"{label}_{timestamp}.png"
+                    filepath = os.path.join(screenshots_dir, filename)
+                    screenshot.save(filepath, format='PNG')
+                    rel_path = os.path.relpath(filepath, self._agent.file.agent_dir)
+                except Exception as e:
+                    logger.warning(f"Failed to save screenshot to file: {e}")
+                    rel_path = f"{label}_{datetime.now().strftime('%H%M%S')}"
+                self._log_output((rel_path, base64_str))
+
+            def do_with_device(self, task, device=None):
+                self._check_call_count()
                 if self._mode in ['handle_message', 'conclude_task']:
                     raise Exception(f"do_with_device is not allowed in {self._mode} mode.")
-
-                result = self._agent.do_with_device(task, knowledge, device)
+                result = self._agent.do_with_device(task, device=device)
+                self._capture_result('do_with_device', result)
+                # Save a screenshot after finishing the device task
+                try:
+                    if device:
+                        device_obj = self._agent.device_manager.get_device(device)
+                    else:
+                        device_obj = self._agent.device_manager.get_first_device()
+                    if device_obj:
+                        screenshot = device_obj.take_screenshot()
+                        if screenshot is not None:
+                            self._save_screenshot(screenshot, label=device or 'device')
+                except Exception as e:
+                    logger.debug(f"Could not capture post-action screenshot: {e}")
                 return result
 
             def query_model(self, params, model_name=None):
+                self._check_call_count()
                 result = self._agent.query_model(params, model_name)
+                self._capture_result('query_model', result)
                 return result
 
-            def execute_task(self, task, knowledge='', max_steps=20):
-                """
-                Execute a subtask. This allows breaking down complex tasks into smaller ones.
-
-                Args:
-                    task: Task description
-                    knowledge: Useful knowledge for doing the task
-                    max_steps: Maximum number of steps for the subtask
-
-                Returns:
-                    list: Results from subtask execution
-                """
-                # Check if mode allows task execution
+            def execute_task(self, task, max_steps=20):
+                self._check_call_count()
                 if self._mode in ['handle_message', 'conclude_task']:
                     raise Exception(f"execute_task is not allowed in {self._mode} mode.")
-
-                result = self._agent.execute_task(task, knowledge, max_steps, _recursion_depth=self._recursion_depth + 1)
+                result = self._agent.execute_task(task, max_steps=max_steps, _recursion_depth=self._recursion_depth + 1)
+                self._capture_result('execute_task', result)
                 return result
 
             def take_note(self, text):
-                """
-                Record a text note about task progress.
-                Use this for information that helps with future steps.
-
-                Args:
-                    text: Note text to record
-
-                Returns:
-                    str: Confirmation message
-                """
-                self._notes.append(text)
-                return f"Note recorded: {text}"
-
-            def record_result(self, content):
-                """
-                Record a task result.
-                Use this for final results relevant to the task goal.
-
-                Args:
-                    content: Result content to record
-
-                Returns:
-                    str: Confirmation message
-                """
-                self._results.append(content)
-                return f"Result recorded: {content}"
+                self._check_call_count()
+                self._log_output(f"Note: {text}")
 
             def send_message(self, message, receiver=None, channel=None):
-                """
-                Send a message to receiver through channel.
-
-                Args:
-                    message: Message content (string, image/file path, or list)
-                    receiver: Name/id of the message receiver
-                    channel: Channel to send through (e.g., 'wechat', 'API')
-
-                Returns:
-                    str: Confirmation message
-                """
+                self._check_call_count()
                 result = self._agent.send_message(message, receiver, channel)
+                self._capture_result('send_message', result)
                 return result
 
-            def handle_message(self, message, history, sender, channel):
-                """
-                Handle a received message.
+            def end_task(self, status):
+                """End the current task with a status.
 
                 Args:
-                    message: Incoming message content
-                    history: Recent conversation history
-                    sender: Who sent the message
-                    channel: Channel the message came from
-
-                Returns:
-                    list: Results from message handling
+                    status: 'finished', 'failed', or 'infeasible'
                 """
-                result = self._agent.handle_message(message, history, sender, channel)
-                return result
+                self._check_call_count()
+                if status not in ('finished', 'failed', 'infeasible'):
+                    raise ValueError(f"Invalid task status: {status}. Must be 'finished', 'failed', or 'infeasible'.")
+                self._task_status = status
 
-        return AgentAPI(self, recursion_depth, mode)
+            def get_device_screen(self, device=None):
+                """Get the current screen of a device as a screenshot.
+                The screenshot will be saved to _temp/screenshots/ and included in the next step's context.
+
+                Args:
+                    device: Name/id of the device. If None, uses the first available device.
+                """
+                self._check_call_count()
+                if device:
+                    device_obj = self._agent.device_manager.get_device(device)
+                else:
+                    device_obj = self._agent.device_manager.get_first_device()
+                if not device_obj:
+                    raise Exception(f"Device not found: {device}")
+                screenshot = device_obj.take_screenshot()
+                if screenshot is None:
+                    raise Exception(f"Failed to take screenshot from device: {device}")
+                self._save_screenshot(screenshot, label=device or 'device_screen')
+
+            def read_image(self, image_path):
+                """Read an image file and include it in the next step's context.
+
+                Args:
+                    image_path: Relative path (from agent dir) or absolute path to the image file.
+                """
+                self._check_call_count()
+                import base64
+                from io import BytesIO
+                from PIL import Image
+                if not os.path.isabs(image_path):
+                    image_path = os.path.join(self._agent.file.agent_dir, image_path)
+                img = Image.open(image_path)
+                buf = BytesIO()
+                img.save(buf, format='PNG')
+                base64_str = base64.b64encode(buf.getvalue()).decode('utf-8')
+                self._log_output((image_path, base64_str))
+
+        return AgentAPI(self, actions_and_results, recursion_depth, mode, task_tag, indent)
 

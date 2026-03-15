@@ -1,0 +1,1 @@
+This directory is for the agent to save logs during task execution.

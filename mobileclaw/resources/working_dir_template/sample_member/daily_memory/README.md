@@ -1,0 +1,1 @@
+This directory is for the agent to organize daily memory.
