@@ -674,13 +674,11 @@ Please provide your answer in the exact JSON format shown above."""
 
         # Common note-taking and result recording actions for all device types
         note_actions = """
-### Note-Taking Actions (for recording progress information useful for future steps):
-- `device.take_note(text)`: Record a text note about task progress
-- `device.take_note_screenshot(description, bbox=(x1,y1,x2,y2))`: Record a screenshot note with description. bbox is the screen bounding box to capture. bbox=None means full screen.
-
-### Result Recording Actions (for recording any relevant information requested by the task):
-- `device.record_result(content)`: Record a task result (text). Only the recorded content and files will be returned to the task caller.
-- `device.record_result_screenshot(description, bbox=(x1,y1,x2,y2))`: Record a screenshot of task result with description. bbox is the screen bounding box to capture. bbox=None means full screen."""
+### Note-Taking Actions:
+- `device.take_note(text)`: Record a text note about task progress"""
+# - `device.take_note_screenshot(description, bbox=(x1,y1,x2,y2))`: Record a screenshot note with description. bbox is the screen bounding box to capture. bbox=None means full screen.
+# - `device.record_result(content)`: Record a task result (text).
+# - `device.record_result_screenshot(description, bbox=(x1,y1,x2,y2))`: Record a screenshot of task result with description. bbox is the screen bounding box to capture. bbox=None means full screen."""
 
         if device_type == 'computer':
             return """### Computer Device Actions:
@@ -738,9 +736,6 @@ Please provide your answer in the exact JSON format shown above."""
                 - device_type: str - 'computer', 'phone', or 'browser'
                 - current_screen: str - Base64 encoded screenshot of current screen
                 - images: list - List of image tuples (path, base64) from previous screenshots and noted images
-                - language: str - 'zh' or 'en'
-                - knowledge: str - Useful knowledge for doing the task
-                - agent_info: str - Agent context information (profile, memory, etc.)
 
         Returns:
             tuple: (thought, code) - Thought string and Python code to execute
@@ -750,8 +745,6 @@ Please provide your answer in the exact JSON format shown above."""
         device_type = params['device_type']
         current_screen = params['current_screen']
         images = params.get('images', [])  # contains the screenshots from previous steps and images captured by device.take_note_screenshot()
-        knowledge = params.get('knowledge', '')  # Useful knowledge for doing the task
-        agent_info = params.get('agent_info', '')  # Agent context information
 
         # Extract text and medias using utility function
         # actions_text contains action history and notes
@@ -778,14 +771,8 @@ The following device control methods are available through the `device` object:
 
 # The Current Task
 
-## Agent Information
-{agent_info}
-
 ## Task to Complete
 {task}
-
-## Task-related Knowledge
-{knowledge if knowledge else '(No specific knowledge provided)'}
 
 ## Action History and Notes
 {actions_text if actions_text else '(No previous actions)'}
@@ -809,11 +796,8 @@ Note:
         # Build messages with screenshot
         content_parts = [{"type": "text", "text": prompt}]
 
-        # Collect all medias: action screenshots (history screenshots)
-        all_medias = actions_medias + images
-
-        # Add all media content parts
-        media_content_parts = self._organize_medias_as_content_parts(all_medias)
+        # Add history images (step screenshots + note screenshots, pre-selected by caller)
+        media_content_parts = self._organize_medias_as_content_parts(images)
         if media_content_parts:
             content_parts.extend(media_content_parts)
 
@@ -950,6 +934,7 @@ Note:
 - Device use
   - `agent.get_device_screen(device)`: get the current screen of a device. The screenshot will be included in the next step's context. Make sure to call this first when starting a device-use session.
   - `agent.do_with_device(task, device)`: Execute a subtask on a device (phone/browser/...) based on the current screen. `task` is a natural language description of what to do based on current screen (should be a simple task with less than 5 interactions). `device` is the name/id of an available device. The available devices can be found in `Available Devices` section.
+  - `agent.infer_from_last_trajectory(question)`: Summarize information from the last `do_with_device` trajectory (actions, thoughts, and screens). `question` is what you want to know from the trajectory. Must be called after `do_with_device`.
 
 - Task decomposition
   - `agent.execute_task(task)`: Execute a subtask (for breaking down complex tasks into smaller ones).
