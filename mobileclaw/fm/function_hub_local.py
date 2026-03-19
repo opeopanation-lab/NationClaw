@@ -21,13 +21,13 @@ class FunctionHubLocal(UniInterface):
         self._tag = 'fm.function_hub'
         self._retry = 3
 
-        self.fm_api_url = self.agent.config.ruyix_url
-        self.fm_api_key = self.agent.config.ruyix_key
-        self.fm_name = self.agent.config.ruyix_fm_name
+        self.fm_api_url = self.agent.config.wisewk_url
+        self.fm_api_key = self.agent.config.wisewk_key
+        self.fm_name = self.agent.config.wisewk_fm_name
 
-        self.gui_vlm_api_url = self.agent.config.ruyix_url
-        self.gui_vlm_api_key = self.agent.config.ruyix_key
-        self.gui_vlm_name = self.agent.config.ruyix_gui_vlm_name
+        self.gui_vlm_api_url = self.agent.config.wisewk_url
+        self.gui_vlm_api_key = self.agent.config.wisewk_key
+        self.gui_vlm_name = self.agent.config.wisewk_gui_vlm_name
 
         if self.agent.config.use_custom_fm:
             self.fm_api_url = self.agent.config.custom_fm_url

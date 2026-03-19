@@ -44,6 +44,24 @@ class Chat_Interface(UniInterface):
             self.telegram_client._open()
             self.chat_clients['telegram'] = self.telegram_client
 
+        if 'discord' in self.chat_channels:
+            from .discord_client import Discord_Client
+            self.discord_client = Discord_Client(self.agent)
+            self.discord_client._open()
+            self.chat_clients['discord'] = self.discord_client
+
+        if 'whatsapp' in self.chat_channels:
+            from .whatsapp_client import WhatsApp_Client
+            self.whatsapp_client = WhatsApp_Client(self.agent)
+            self.whatsapp_client._open()
+            self.chat_clients['whatsapp'] = self.whatsapp_client
+
+        if 'slack' in self.chat_channels:
+            from .slack_client import Slack_Client
+            self.slack_client = Slack_Client(self.agent)
+            self.slack_client._open()
+            self.chat_clients['slack'] = self.slack_client
+
     def _close(self):
         for client in self.chat_clients.values():
             if client is not None:

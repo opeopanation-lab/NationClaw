@@ -708,8 +708,8 @@ Task: {current_task}
 
     def print_model_configuration(self):
         """Print model configuration information used in the execution script."""
-        if getattr(self.config, 'use_ruyix_service', False):
-            logger.info("✅ Using RuyiX service")
+        if getattr(self.config, 'use_wisewk_service', False):
+            logger.info("✅ Using Wisewk service")
         if getattr(self.config, 'use_custom_fm', False):
             logger.info("✅ Using custom FM model")
         if getattr(self.config, 'use_custom_gui_vlm', False):
