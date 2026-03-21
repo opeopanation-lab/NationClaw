@@ -270,10 +270,6 @@ class WebsocketController(DeviceControllerBase):
 
     def start_app(self, app) -> bool:
         try:
-            # 尝试直接使用 Ruyi Client 启动 app（Deprecated）
-            # res = self._send_command('open_app,' + app)
-            # logger.info(f"✅ 成功启动 app \"{app}\"")
-
             res = self._send_command('get_app_launcher_component_name,' + app)
             app_launcher_component_name = res['message']
             if app_launcher_component_name:
@@ -285,17 +281,17 @@ class WebsocketController(DeviceControllerBase):
                 )
                 logger.info(f"✅ 成功启动 app \"{app}\"")
             else:
-                raise RuntimeError(f"Ruyi Client 未找到名为 \"{app}\" 的应用")
+                raise RuntimeError(f"start_app 未找到名为 \"{app}\" 的应用")
 
 
             self.agent.sleep(0.5)
             # 通知应用启动成功，传递已获取的 app_launcher_component_name
             self._notify_app_started(app, app_launcher_component_name=app_launcher_component_name)
         except Exception as e:
-            # 如果 Ruyi Client 启动 app 失败，则调用 LLM 智能分析提取所需启动的 app 的 package name
+            # 如果启动 app 失败，则调用 LLM 智能分析提取所需启动的 app 的 package name
             logger.info(f"🔁 未能直接在手机上找到 “{app}” app，正在智能分析本地 app 信息，并尝试启动")
 
-            # 提取 Ruyi Client 返回的 availableApps
+            # 提取返回的 availableApps
             available_apps = []
             if len(e.args) > 0 and isinstance(e.args[0], dict):
                 error_dict = e.args[0]
@@ -918,7 +914,7 @@ Note: Be conservative - only return a match if you're confident the user meant t
 
             component_name = ""
             if adb_result.returncode == 0 and adb_result.stdout:
-                # 解析输出，格式通常类似于：topResumedActivity=ActivityRecord{40c5d47 u0 com.wisewk.assistant/com.example.ruyiclient.MainActivity t378}
+                # 解析输出，格式通常类似于：topResumedActivity=ActivityRecord{40c5d47 u0 com.example.assistant/com.example.assistant.MainActivity t378}
                 match = re.search(r'topResumedActivity=ActivityRecord\{[^}]+\s+u0\s+([^}\s]+)', adb_result.stdout)
                 if match:
                     component_name = match.group(1).strip()

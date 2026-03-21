@@ -20,11 +20,6 @@ logger = structlog.get_logger(__name__)
 class DeviceManager(UniInterface):
     """
     设备管理器：根据设备名称（支持中英文与编号后缀）创建并缓存对应设备实例。
-
-    - 继承自 RuyiInterface，初始化需传入 agent
-    - get_device(name): 返回 Browser/Websocket/Mac/Windows 的设备实例
-    - 针对设备名称做双语匹配，并从 agent.config.device_mappings 中取 device_id
-    - 已创建过的设备会缓存并复用
     """
 
     def __init__(self, agent):

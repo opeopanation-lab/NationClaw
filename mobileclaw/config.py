@@ -454,7 +454,7 @@ def CustomArg(
     @dataclass
     class Args:
         regular_arg: str = dataclasses.field(default="abc", metadata={"aliases": ["--example", "-e"], "help": "This syntax could be better!"})
-        ruyi_arg: str = CustomArg(default="abc", aliases=["--example", "-e"], help="What a nice syntax!")
+        custom_arg: str = CustomArg(default="abc", aliases=["--example", "-e"], help="What a nice syntax!")
     ```
 
     Args:
