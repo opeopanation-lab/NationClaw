@@ -108,6 +108,12 @@ class Zulip_Client(Chat_Client):
         sender_id = msg['sender_id']
         sender_name = msg['sender_full_name']
 
+        self._set_org_manager_if_missing(
+            'org_manager_email',
+            'chat_zulip_org_manager',
+            sender_email,
+        )
+
         # Handle commands (only from org_manager)
         if content.startswith('/') and sender_email == self.org_manager_email:
             self._handle_command(content.strip(), msg)
@@ -452,4 +458,3 @@ class Zulip_Client(Chat_Client):
                 self.send_message(message, receiver=self.log_receiver, subject=subject)
             except Exception as e:
                 logger.exception(f'Error sending to log receiver: {e}')
-

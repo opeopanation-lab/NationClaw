@@ -331,6 +331,12 @@ class Telegram_Client(Chat_Client):
         # Store chat_id for replies
         self._chat_ids[sender_id] = chat_id
 
+        self._set_org_manager_if_missing(
+            'org_manager_user_id',
+            'chat_telegram_org_manager',
+            sender_id,
+        )
+
         # Build content from text and/or media
         content_parts = []
         media_paths = []
@@ -519,4 +525,3 @@ class Telegram_Client(Chat_Client):
     def get_history_messages(self, msg, max_previous_messages=10):
         """Get message history. Returns empty list as Telegram bot API doesn't provide easy history access."""
         return []
-

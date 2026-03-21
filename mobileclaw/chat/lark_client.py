@@ -254,6 +254,12 @@ class Lark_Client(Chat_Client):
             if not content:
                 return
 
+            self._set_org_manager_if_missing(
+                'org_manager_open_id',
+                'chat_lark_org_manager',
+                sender_id,
+            )
+
             # Handle commands (only from org_manager)
             if content.startswith('/') and sender_id == self.org_manager_open_id:
                 await self._handle_command(content.strip(), chat_id, message_id)
@@ -721,4 +727,3 @@ class Lark_Client(Chat_Client):
             self.send_message(message, receiver=f"group:{self.log_receiver}", subject=subject)
         except Exception as e:
             logger.exception(f'Error sending to log receiver: {e}')
-
