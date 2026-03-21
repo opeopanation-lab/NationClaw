@@ -36,14 +36,26 @@ class WebsocketController(DeviceControllerBase):
         return f"手机设备: {self.device_name}"
 
     def _resolve_device_serial_id(self) -> str:
+        """
+        解析设备序列号
+        - 优先从配置的 device_mappings 中读取
+        - 对于Android应用内场景，直接返回配置的设备ID（如"local"）
+        - ADB方式仅作为PC控制场景的回退方案
+        
+        Returns:
+            str: 设备序列号
+        """
         try:
             # 优先从配置的 device_mappings 中读取
             if self.device_name in self.config.device_mappings:
-                return self.config.device_mappings[self.device_name]
+                device_id = self.config.device_mappings[self.device_name]
+                logger.debug(f"从配置中获取设备ID: {device_id}")
+                return device_id
         except Exception as e:
             logger.debug(f"读取配置的 device_mappings 失败: {str(e)}")
 
-        # 未在配置中找到，尝试通过 adb devices 获取
+        # 对于Android应用内场景，配置应该已经包含设备映射
+        # 如果没有配置，说明可能是PC控制场景，尝试通过 adb devices 获取
         def _list_connected_devices() -> list:
             try:
                 result = subprocess.run(
@@ -65,25 +77,23 @@ class WebsocketController(DeviceControllerBase):
                 return []
 
         device_ids = _list_connected_devices()
-
-        # logger.info("device_ids:" + str(device_ids))        
         
         if device_ids:
-            logger.info("⚠️ 当前未添手机设备，已自动使用连接到电脑的第一个手机设备来执行任务")
+            logger.info("⚠️ 当前未在配置中找到设备映射，已自动使用ADB连接的第一个设备（仅适用于PC控制场景）")
             return device_ids[0]
 
         # 未检测到已连接设备：提醒并轮询，直到发现设备
-        logger.info("❌ 当前未添手机设备，且未检测到有手机设备连接到电脑，请检查手机的连接情况，将在 3 秒后重试任务执行")
+        logger.info("❌ 当前未在配置中找到设备映射，且未检测到ADB连接的设备。请检查配置或设备连接状态，将在 3 秒后重试")
         last_notice_ts = time.time()
-        while True:
+        while self.agent._enabled:
             time.sleep(0.2)
             device_ids = _list_connected_devices()
             if device_ids:
-                logger.info("📱 已自动使用连接到电脑的第一个手机设备来执行任务")
+                logger.info("📱 已自动使用ADB连接的第一个设备（仅适用于PC控制场景）")
                 return device_ids[0]
             # 每 3 秒提醒一次
             if time.time() - last_notice_ts >= 3:
-                logger.info("❌ 当前未添手机设备，且未检测到有手机设备连接到电脑，请检查手机的连接情况，将在 3 秒后重试任务执行")
+                logger.info("❌ 仍未检测到设备，请检查配置或设备连接状态，将在 3 秒后重试")
                 last_notice_ts = time.time()
 
     def _open(self):
@@ -270,28 +280,36 @@ class WebsocketController(DeviceControllerBase):
 
     def start_app(self, app) -> bool:
         try:
-            res = self._send_command('get_app_launcher_component_name,' + app)
-            app_launcher_component_name = res['message']
-            if app_launcher_component_name:
-                result = subprocess.run(
-                    f"adb -s {self.device_serial_id} shell am start -n {app_launcher_component_name}",
-                    shell=True,
-                    capture_output=True,
-                    text=True
-                )
-                logger.info(f"✅ 成功启动 app \"{app}\"")
+            # 根据配置选择启动方式
+            if self.config.prefer_phone_action_type == 'adb':
+                # ADB 模式：需要获取 package 和 activity，然后用 ADB 启动
+                logger.debug(f"使用 ADB 启动应用: {app}")
+                
+                # 先尝试直接启动（通过 open_app 获取可用应用列表）
+                # 如果失败，会在 except 块中使用 LLM 智能查找
+                raise RuntimeError(f"ADB 模式需要通过智能查找启动应用")
+                
             else:
-                raise RuntimeError(f"start_app 未找到名为 \"{app}\" 的应用")
-
-
-            self.agent.sleep(0.5)
-            # 通知应用启动成功，传递已获取的 app_launcher_component_name
-            self._notify_app_started(app, app_launcher_component_name=app_launcher_component_name)
+                # WebSocket 模式：直接使用 open_app 命令（传入应用名称）
+                logger.debug(f"使用 WebSocket 启动应用: {app}")
+                launch_res = self._send_command('open_app,' + app)
+                
+                if launch_res.get('status') != 'success':
+                    raise RuntimeError(f"WebSocket 启动应用失败: {launch_res.get('message', 'Unknown error')}")
+                
+                logger.info(f"✅ 成功启动 app \"{app}\"")
+                self.agent.sleep(0.5)
+                
+                # WebSocket 模式下，component name 从 open_app 返回的信息中获取（如果有）
+                # 或者设置为空
+                app_launcher_component_name = ''
+                self._notify_app_started(app, app_launcher_component_name=app_launcher_component_name)
+            
         except Exception as e:
-            # 如果启动 app 失败，则调用 LLM 智能分析提取所需启动的 app 的 package name
+            # 如果 手机端 启动 app 失败，则调用 LLM 智能分析提取所需启动的 app 的 package name
             logger.info(f"🔁 未能直接在手机上找到 “{app}” app，正在智能分析本地 app 信息，并尝试启动")
 
-            # 提取返回的 availableApps
+            # 提取 手机端 返回的 availableApps
             available_apps = []
             if len(e.args) > 0 and isinstance(e.args[0], dict):
                 error_dict = e.args[0]
@@ -299,13 +317,16 @@ class WebsocketController(DeviceControllerBase):
 
             logger.debug(f"🔁 直接找到的 app，当前设备上的可见app列表为: {available_apps}")
 
-            # 获取 Ruyi Client 捕获的 app 之外的 app package（比如：新安装的 app）
-            all_packages = self._get_all_installed_packages()
-            available_packages = set()
-            for app_info in available_apps:
-                if isinstance(app_info, dict) and 'appPkg' in app_info:
-                    available_packages.add(app_info['appPkg'])
-            other_app_packages = [pkg for pkg in all_packages if pkg not in available_packages]
+            # 获取 手机端 捕获的 app 之外的 app package（比如：新安装的 app）
+            # 仅在 ADB 模式下获取额外的 app packages
+            other_app_packages = []
+            if self.config.prefer_phone_action_type == 'adb':
+                all_packages = self._get_all_installed_packages()
+                available_packages = set()
+                for app_info in available_apps:
+                    if isinstance(app_info, dict) and 'appPkg' in app_info:
+                        available_packages.add(app_info['appPkg'])
+                other_app_packages = [pkg for pkg in all_packages if pkg not in available_packages]
             
             # 调用 LLM 提取所需启动的 app 的 package name
             # result = self.agent.fm.dynamic_prompt.find_app(app, available_apps, other_app_packages)
@@ -360,17 +381,31 @@ Note: Be conservative - only return a match if you're confident the user meant t
                         break
                 
                 if found_in_available and launcher_activity:
-                    # 从 available_apps 中找到，使用其 appLauncher
+                    # 从 available_apps 中找到，根据配置启动
                     logger.debug(f"从 available_apps 中找到应用，启动Activity: {launcher_activity}")
-                    success, app_launcher_component_name = self._start_app_by_package(package_name, launcher_activity)
+                    
+                    if self.config.prefer_phone_action_type == 'adb':
+                        # ADB 模式：使用 _start_app_by_package
+                        success, app_launcher_component_name = self._start_app_by_package(package_name, launcher_activity)
+                    else:
+                        # WebSocket 模式：直接使用 open_app 命令传应用名
+                        try:
+                            launch_res = self._send_command(f'open_app,{app}')
+                            success = launch_res.get('status') == 'success'
+                            app_launcher_component_name = f"{package_name}/{launcher_activity}"
+                        except Exception as e:
+                            logger.debug(f"WebSocket 启动失败: {e}")
+                            success = False
+                            app_launcher_component_name = None
+                    
                     if success:
                         logger.info(f"✅ 成功启动 app \"{app}\"")
                         self.agent.sleep(0.5)
                         # 通知应用启动成功，传递已获取的 app_launcher_component_name
                         self._notify_app_started(app, app_launcher_component_name=app_launcher_component_name)
                         return True
-                else:
-                    # 从 other_app_packages 中找到，需要获取其启动 Activity
+                elif self.config.prefer_phone_action_type == 'adb':
+                    # 仅在 ADB 模式下尝试从 other_app_packages 中启动
                     logger.debug(f"从 other_app_packages 中找到应用: {package_name}")
                     success, app_launcher_component_name = self._start_app_by_package(package_name)
                     if success:
@@ -407,9 +442,9 @@ Note: Be conservative - only return a match if you're confident the user meant t
             "version": ""
         }
         
-        # 尝试获取应用版本信息
+        # 尝试获取应用版本信息 (仅 ADB 模式支持)
         try:
-            if app_launcher_component_name:
+            if app_launcher_component_name and self.config.prefer_phone_action_type == 'adb':
                 # 从 component name 中提取 package name (格式通常是: com.package.name/.ActivityName)
                 package_name = app_launcher_component_name.split('/')[0] if '/' in app_launcher_component_name else app_launcher_component_name
                 result = subprocess.run(
@@ -430,15 +465,26 @@ Note: Be conservative - only return a match if you're confident the user meant t
         return app_info
     
     def kill_app(self, app) -> bool:
+        """
+        强制停止应用
+        Args:
+            app: 应用名称
+        Returns:
+            bool: 是否成功
+        """
         try:
-            res = self._send_command('get_app_package_name,' + app)
-            app_package_name = res['message']
-            if app_package_name:
-                os.system(f"adb shell am force-stop {app_package_name}")
+            # 通过WebSocket发送kill_app命令（WebSocket服务器会处理包名获取和强制停止）
+            res = self._send_command(f'kill_app,{app}')
+            
+            if res.get('status') == 'success':
+                logger.debug(f"已通过WebSocket强制停止应用: {app}")
                 return True
             else:
+                logger.debug(f"强制停止应用失败: {res.get('message', 'Unknown error')}")
                 return False
+                    
         except Exception as e:
+            logger.debug(f"强制停止应用失败: {str(e)}")
             return False
     
     def push_file(self, local_path, remote_path):
@@ -844,9 +890,16 @@ Note: Be conservative - only return a match if you're confident the user meant t
     def get_current_app_package(self) -> str:
         """
         获取当前前台应用的包名
+        
+        注意:此功能仅在 ADB 模式下可用,WebSocket 模式下会返回空字符串
+        
         Returns:
-            str: 当前前台应用的包名，如果获取失败返回空字符串
+            str: 当前前台应用的包名，如果获取失败或不在 ADB 模式下返回空字符串
         """
+        if self.config.prefer_phone_action_type != 'adb':
+            logger.debug("WebSocket 模式不支持获取当前应用包名")
+            return ""
+        
         try:
             # 使用 adb 命令获取当前前台活动
             result = subprocess.run(
@@ -888,19 +941,25 @@ Note: Be conservative - only return a match if you're confident the user meant t
     def get_current_app_info(self) -> dict:
         """
         获取当前前台应用的完整信息，包括包名和显示名称
+        
+        注意:此功能仅在 ADB 模式下可用,WebSocket 模式下会返回空字典
 
         Returns:
             dict: 包含以下字段的字典：
                 - package_name: 应用包名
                 - component_name: 应用的完整组件名 (package/activity)
                 - display_name: 应用本地显示名称
-                如果获取失败，各字段可能为空字符串
+                如果获取失败或不在 ADB 模式下，各字段可能为空字符串
         """
         result = {
             'package_name': '',
             'component_name': '',
             'display_name': ''
         }
+        
+        if self.config.prefer_phone_action_type != 'adb':
+            logger.debug("WebSocket 模式不支持获取当前应用信息")
+            return result
 
         try:
             # 第一步：通过 ADB 获取当前前台活动的完整组件名
@@ -914,7 +973,7 @@ Note: Be conservative - only return a match if you're confident the user meant t
 
             component_name = ""
             if adb_result.returncode == 0 and adb_result.stdout:
-                # 解析输出，格式通常类似于：topResumedActivity=ActivityRecord{40c5d47 u0 com.example.assistant/com.example.assistant.MainActivity t378}
+                # 解析输出，格式通常类似于：topResumedActivity=ActivityRecord{40c5d47 u0 com.wisewk.assistant/com.example.ruyiclient.MainActivity t378}
                 match = re.search(r'topResumedActivity=ActivityRecord\{[^}]+\s+u0\s+([^}\s]+)', adb_result.stdout)
                 if match:
                     component_name = match.group(1).strip()
@@ -982,15 +1041,6 @@ Note: Be conservative - only return a match if you're confident the user meant t
 
         return result
 
-    def _is_wechat_app(self) -> bool:
-        """
-        检查当前前台应用是否是微信
-        Returns:
-            bool: 如果是微信返回 True，否则返回 False
-        """
-        current_package = self.get_current_app_package()
-        return current_package == "com.tencent.mm"
-    
     def _adb_input_text(self, text) -> bool:
         """
         使用 adb 命令输入文本
@@ -1084,34 +1134,29 @@ Note: Be conservative - only return a match if you're confident the user meant t
         # 确保text是字符串类型
         text_str = str(text)
         
-        # 检查当前是否是微信应用
-        if self._is_wechat_app():
-            logger.debug("检测到微信应用，使用 adb 进行文本输入")
+        # 根据配置选择输入方式
+        if self.config.prefer_phone_action_type == 'adb':
+            logger.debug(f"使用 adb 命令清除并输入文本: {text_str}")
             # 先清除现有文本，然后输入新文本
             self._adb_clear_text()
             return self._adb_input_text(text_str)
         else:
-            # 使用原有的 websocket 方式
-            res = self._send_command('clear,' + text_str)
-
-            if self.config.prefer_phone_action_type == 'adb':
-                logger.debug(f"使用 adb 命令输入文本: {text_str}")
-                res = self._adb_input_text(text_str)
-            else:
-                logger.debug(f"使用 websocket 命令输入文本: {text_str}")
-                res = self._send_command('input,' + text_str)
-            return res
+            logger.debug(f"使用 websocket 命令清除并输入文本: {text_str}")
+            # 使用 websocket 方式：先清除，再输入
+            self._send_command('clear')
+            res = self._send_command('input,' + text_str)
+            return True
     
     def view_append_text(self, text) -> bool:
         # 确保text是字符串类型
         text_str = str(text)
         
-        # 检查当前是否是微信应用
-        if self._is_wechat_app():
-            logger.debug("检测到微信应用，使用 adb 进行文本输入")
+        # 根据配置选择输入方式
+        if self.config.prefer_phone_action_type == 'adb':
+            logger.debug(f"使用 adb 命令追加输入文本: {text_str}")
             return self._adb_input_text(text_str)
         else:
-            # 使用原有的 websocket 方式
+            logger.debug(f"使用 websocket 命令追加输入文本: {text_str}")
             res = self._send_command('input,' + text_str)
             return True
     
@@ -1130,15 +1175,21 @@ Note: Be conservative - only return a match if you're confident the user meant t
 
     def enter(self) -> bool:
         """在当前设备上发送回车键 (Enter)"""
-        try:
-            subprocess.run(
-                f"adb -s {self.device_serial_id} shell input keyevent 66",
-                shell=True,
-                check=True
-            )
-            return True
-        except Exception as e:
-            logger.error(f"发送 Enter 动作失败: {e}")
+        if self.config.prefer_phone_action_type == 'adb':
+            try:
+                subprocess.run(
+                    f"adb -s {self.device_serial_id} shell input keyevent 66",
+                    shell=True,
+                    check=True
+                )
+                logger.debug("使用 adb 命令发送回车键")
+                return True
+            except Exception as e:
+                logger.error(f"使用 adb 发送 Enter 动作失败: {e}")
+                return False
+        else:
+            # WebSocket 模式暂不支持 Enter 键
+            logger.warning("WebSocket 模式暂不支持 Enter 键操作")
             return False
 
     def _send_command(self, command: str):
@@ -1213,35 +1264,73 @@ Note: Be conservative - only return a match if you're confident the user meant t
 
     def take_screenshot_impl(self, save_path=None) -> PIL.Image:
         """
-        由于 Ruyi Assistant 录屏权限不稳定
-        临时使用 ADB 命令进行截图（使用 exec-out 直接输出）
+        获取设备截图
+        - 根据 prefer_phone_action_type 配置选择截图方式
+        - websocket: 仅使用 WebSocket 方式
+        - adb: 优先使用 ADB 方式，失败时尝试 WebSocket
+        
         Args:
-            device_serial_id: 设备序列号
+            save_path: 可选的保存路径
         Returns:
             PIL.Image: 截图图像
         """
-        while True:
-            try:
-                screenshot_image = self.take_screenshot_adb()
-                return screenshot_image
-            except Exception as e:
-                logger.info(f"📷 获取界面截图失败，可能是当前设备未连接，或者当前设备处于隐私保护界面，无法截图，请检查设备连接状态并重试")
-                logger.debug(f"获取界面截图失败，错误信息: {str(e)}")
-                
-                # 请求用户手动接管
+        while self.agent._enabled:
+            if self.config.prefer_phone_action_type == 'websocket':
+                # WebSocket 模式：仅使用 WebSocket 截图
                 try:
-                    task_language = getattr(self.agent, 'task_language', 'zh')
-                    if task_language == 'en':
-                        message = f'Failed to capture screenshot from device "{self.device_name}". The device may be disconnected or in a privacy protection screen. Please manually handle it and click "Takeover Ended" when done.'
-                    else:
-                        message = f'获取设备 "{self.device_name}" 的界面截图失败，可能是当前设备未连接，或者当前设备处于隐私保护界面，无法截图，请您手动进行处理，处理完成后点击"接管结束"按钮'
+                    screenshot_image = self.take_screenshot_websocket()
+                    logger.debug("使用 WebSocket 方式截图成功")
+                    return screenshot_image
+                except Exception as websocket_error:
+                    logger.info(f"📷 获取界面截图失败，可能是当前设备未连接，或者当前设备处于隐私保护界面，无法截图，请检查设备连接状态并重试")
+                    logger.debug(f"WebSocket截图失败: {str(websocket_error)}")
                     
-                    logger.info(f"⚠️ {message}")
-                    self.agent.user.request_manual_takeover(message, timeout=30)
-                except Exception as takeover_error:
-                    logger.debug(f"请求手动接管失败: {str(takeover_error)}")
-                
-                # 接管结束后，继续循环重试截图
+                    # 请求用户手动接管
+                    try:
+                        task_language = getattr(self.agent, 'task_language', 'zh')
+                        if task_language == 'en':
+                            message = f'Failed to capture screenshot from device "{self.device_name}". The device may be disconnected or in a privacy protection screen. Please manually handle it and click "Takeover Ended" when done.'
+                        else:
+                            message = f'获取设备 "{self.device_name}" 的界面截图失败，可能是当前设备未连接，或者当前设备处于隐私保护界面，无法截图，请您手动进行处理，处理完成后点击"接管结束"按钮'
+                        
+                        logger.info(f"⚠️ {message}")
+                        self.agent.user.request_manual_takeover(message, timeout=30)
+                    except Exception as takeover_error:
+                        logger.debug(f"请求手动接管失败: {str(takeover_error)}")
+                    
+                    # 接管结束后，继续循环重试截图
+            else:
+                # ADB 模式：优先 ADB，失败时尝试 WebSocket
+                try:
+                    screenshot_image = self.take_screenshot_adb()
+                    logger.debug("使用 ADB 方式截图成功")
+                    return screenshot_image
+                except Exception as adb_error:
+                    logger.debug(f"ADB截图失败: {str(adb_error)}, 尝试WebSocket方式")
+                    
+                    try:
+                        screenshot_image = self.take_screenshot_websocket()
+                        logger.debug("使用 WebSocket 方式截图成功（回退方案）")
+                        return screenshot_image
+                    except Exception as websocket_error:
+                        logger.info(f"📷 获取界面截图失败，可能是当前设备未连接，或者当前设备处于隐私保护界面，无法截图，请检查设备连接状态并重试")
+                        logger.debug(f"ADB截图失败: {str(adb_error)}")
+                        logger.debug(f"WebSocket截图失败: {str(websocket_error)}")
+                        
+                        # 请求用户手动接管
+                        try:
+                            task_language = getattr(self.agent, 'task_language', 'zh')
+                            if task_language == 'en':
+                                message = f'Failed to capture screenshot from device "{self.device_name}". The device may be disconnected or in a privacy protection screen. Please manually handle it and click "Takeover Ended" when done.'
+                            else:
+                                message = f'获取设备 "{self.device_name}" 的界面截图失败，可能是当前设备未连接，或者当前设备处于隐私保护界面，无法截图，请您手动进行处理，处理完成后点击"接管结束"按钮'
+                            
+                            logger.info(f"⚠️ {message}")
+                            self.agent.user.request_manual_takeover(message, timeout=30)
+                        except Exception as takeover_error:
+                            logger.debug(f"请求手动接管失败: {str(takeover_error)}")
+                        
+                        # 接管结束后，继续循环重试截图
 
     def start_screen_record(self) -> bool:
         res = self._send_command('start_screen_record')
