@@ -72,7 +72,12 @@ custom_fm_name: "gpt-5.2-chat"
 
 ## Chat App Configuration
 
-MobileClaw supports multiple chat platforms. Configure your preferred platform in `config.yaml`:
+MobileClaw supports `telegram`, `lark`, `qq`, `zulip`, `discord`, `whatsapp`, and `slack`. Configure one or more platforms in `config.yaml` with a comma-separated `chat_channels` value:
+
+```yaml
+chat_channels: zulip,lark
+default_chat_channel: zulip
+```
 
 <details>
 <summary>Telegram</summary>
@@ -154,7 +159,60 @@ chat_zulip_org_manager: manager@example.com  # Org manager's zulip email. Defaul
 
 </details>
 
-We recommend `zulip` or `Lark/Feishu` since they support rich group features.
+<details>
+<summary>Discord</summary>
+
+**1. Create a Discord bot**
+- Visit the [Discord Developer Portal](https://discord.com/developers/applications)
+- Create a new application → Add a bot
+- Copy the bot token
+- Enable the bot intents needed for messages, especially **Message Content Intent**
+- Invite the bot to your server or DM it directly
+
+**2. Configure in `config.yaml`**
+```yaml
+chat_channels: discord
+chat_discord_token: YOUR_BOT_TOKEN
+chat_discord_org_manager: YOUR_USER_ID  # Your Discord user ID
+```
+</details>
+
+<details>
+<summary>WhatsApp</summary>
+
+**1. Start the WhatsApp bridge**
+- MobileClaw's WhatsApp client connects to a local Node.js WebSocket bridge
+- In this repo, the bridge entry point is `nanobot/bridge/src/index.ts`
+- Start the bridge and scan the QR code shown in the bridge terminal to log in
+
+**2. Configure in `config.yaml`**
+```yaml
+chat_channels: whatsapp
+chat_whatsapp_bridge_url: ws://localhost:18790
+chat_whatsapp_org_manager: YOUR_PHONE_OR_SENDER_ID  # Usually phone number without the @suffix
+```
+</details>
+
+<details>
+<summary>Slack</summary>
+
+**1. Create a Slack app**
+- Visit [Slack API Apps](https://api.slack.com/apps)
+- Create a new app → Enable **Socket Mode**
+- Create an app-level token with `connections:write`
+- Add a bot token with the permissions your workspace needs for messaging
+- Install the app to your workspace and copy both tokens
+
+**2. Configure in `config.yaml`**
+```yaml
+chat_channels: slack
+chat_slack_bot_token: xoxb-...
+chat_slack_app_token: xapp-...
+chat_slack_org_manager: U01234567  # Your Slack user ID
+```
+</details>
+
+We recommend `zulip` or `Lark/Feishu` since they support rich group features. `discord`, `whatsapp`, and `slack` are also available but were not sufficiently tested.
 
 ## Acknowledgments
 
@@ -163,4 +221,3 @@ We recommend `zulip` or `Lark/Feishu` since they support rich group features.
 - Inspired by [openclaw](https://github.com/openclaw/openclaw), [ClawPhone](https://www.clawphone.app/) and [nanobot](https://github.com/HKUDS/nanobot) .
 - Inspired and supported by [OmniMind team](https://omnimind.com.cn/).
 - Team accounts sponsored [zulip](https://mobilellm.zulip.com/) and [Feishu](https://www.feishu.cn/).
-
