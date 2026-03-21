@@ -162,10 +162,6 @@ if __name__ == "__main__":
         # print(res)
         # input()
         #
-        # res = client.send_message("log,你好，我是ruyi")
-        # print(res)
-        # input()
-        #
         # client.send_message("show_highlight,500,500,300")
         # input()
         # client.send_message("hide_highlight")

@@ -43,7 +43,7 @@ class DeviceControllerBase(UniInterface):
     def __str__(self) -> str:
         return f"Device Interface: {self.device_name}"
 
-    def execute_task(self, task: str, knowledge='', max_steps: int = 15, keep_recent_images: int = 3):
+    def execute_task(self, task: str, max_steps: int = 15, keep_recent_images: int = 3):
         """
         Execute a device control task using iterative LLM-generated Python code.
 
@@ -53,16 +53,21 @@ class DeviceControllerBase(UniInterface):
             keep_recent_images: Number of recent images to keep in context (default: 3)
 
         Returns:
-            list: Results collected during execution
+            tuple: (actions_and_results, screenshots)
+                - actions_and_results: list of text strings and image tuples
+                - screenshots: list of (screen_path, screen_base64) tuples from each step
         """
         import re
         import base64
         from io import BytesIO
+        from datetime import datetime
 
-        # Initialize notes list (acts as actions_and_results for logging)
+        # Initialize tracking lists
         notes = []
         results = []
         actions_and_results = []
+        screenshots = []  # List of (screen_path, screen_base64) tuples from each step
+        note_screenshots = []  # List of (path, base64) tuples from take_note_screenshot
 
         # Get device type
         from mobileclaw.device.computer import ComputerDeviceBase
@@ -82,7 +87,7 @@ class DeviceControllerBase(UniInterface):
         self.agent._log_and_report(f'Start device task: {task}', actions_and_results, task_tag=task_tag)
 
         # Create DeviceAPI instance for execution (persists across steps for task_status tracking)
-        device_api = self._create_device_api_for_execution(notes, results, actions_and_results)
+        device_api = self._create_device_api_for_execution(notes, results, actions_and_results, note_screenshots)
 
         for step in range(max_steps):
             # Pause if a message is being handled
@@ -92,51 +97,52 @@ class DeviceControllerBase(UniInterface):
             # Take screenshot
             screenshot = self.take_screenshot()
 
-            # Convert screenshot to base64
+            # Save screenshot to temp file and convert to base64
             img_byte_arr = BytesIO()
             screenshot.save(img_byte_arr, format='PNG')
             img_bytes = img_byte_arr.getvalue()
             screenshot_base64 = base64.b64encode(img_bytes).decode('utf-8')
             img_byte_arr.close()
 
-            # Extract images (previous screenshots and noted images) from actions_and_results
-            images = []
-            for item in actions_and_results:
-                if isinstance(item, tuple) and len(item) == 2:
-                    # This is an image tuple (path, base64)
-                    images.append(item)
+            try:
+                screenshots_dir = os.path.join(self.agent.file.agent_temp_dir, 'screenshots')
+                os.makedirs(screenshots_dir, exist_ok=True)
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                filename = f"device_step_{step}_{timestamp}.png"
+                filepath = os.path.join(screenshots_dir, filename)
+                screenshot.save(filepath, format='PNG')
+                screen_path = os.path.relpath(filepath, self.agent.file.agent_dir)
+            except Exception as e:
+                logger.warning(f"Failed to save screenshot to file: {e}")
+                screen_path = f"device_step_{step}_{datetime.now().strftime('%H%M%S')}"
 
-            # Keep only the most recent N images to limit context size
-            if keep_recent_images > 0 and len(images) > keep_recent_images:
-                images = images[-keep_recent_images:]
+            screenshots.append((screen_path, screenshot_base64))
+            self.agent._log_and_report(f'Step {step} Screen: {screen_path}', actions_and_results, task_tag=task_tag)
 
-            # Get agent context information for this step
-            agent_info = self.agent.get_agent_info()
+            # Build images from most recent step screenshots and note screenshots
+            recent_screens = screenshots[-(keep_recent_images):] if keep_recent_images > 0 else screenshots
+            recent_notes = note_screenshots[-(keep_recent_images):] if keep_recent_images > 0 else note_screenshots
+            images = recent_screens + recent_notes
 
             # Prepare params for device_use_step
             if len(actions_and_results) > self.agent.actions_and_results_max_len:
                 actions_and_results = actions_and_results[-self.agent.actions_and_results_max_len:]
             params = {
                 'task': task,
-                'knowledge': knowledge,
                 'actions_and_results': actions_and_results,
                 'device_type': device_type,
                 'current_screen': screenshot_base64,
                 'images': images,
-                'agent_info': agent_info
             }
 
             # Call device_use_step API
             thought, code = self.agent.fm.call_func('device_use_step', params)
 
             # Store screenshot in actions_and_results for history
-            # Format: (path, base64) tuple - path can be descriptive string
-            screenshot_path = f"previous_screenshot_step_{step}.png"
-            actions_and_results.append((screenshot_path, screenshot_base64))
+            actions_and_results.append((screen_path, screenshot_base64))
 
             # Add thought to results
             if thought:
-                # self.agent.user.notify_thought(thought)
                 self.agent._log_and_report(f'Step {step} Thought: {thought}', actions_and_results, task_tag=task_tag)
 
             # Stop if no code generated
@@ -144,9 +150,9 @@ class DeviceControllerBase(UniInterface):
                 warning_msg = f"Step {step} Error: No code parsed from the response. Perhaps forgot to wrap code in code block?"
                 logger.warning(warning_msg)
                 self.agent._log_and_report(warning_msg, actions_and_results, task_tag=task_tag)
-                continue # break
+                continue
 
-            self.agent._log_and_report(f'Step {step} Action:\n```\n{code}\n```', actions_and_results, task_tag=task_tag)
+            self.agent._log_and_report(f'Step {step} Action: `{code}`', actions_and_results, task_tag=task_tag)
 
             # Execute the code
             try:
@@ -174,11 +180,33 @@ class DeviceControllerBase(UniInterface):
             # Sleep between steps
             self.agent.sleep(0.5)
         if step + 1 >= max_steps and device_api._task_status == 'ongoing':
-            self.agent._log_and_report(f'[WARNING] Task stopped due to step limit: {max_steps}. You may need to start a new task to complete the remaining work.', actions_and_results, task_tag=task_tag)
-        # self.agent._conclude_task(f'(With device {self.device_name}) {task}', actions_and_results=actions_and_results)
-        return results
+            self.agent._log_and_report(f'[WARNING] Task stopped due to step limit: {max_steps}.', actions_and_results, task_tag=task_tag)
 
-    def _create_device_api_for_execution(self, notes, results, actions_and_results):
+        # Take a final screenshot and add to results
+        try:
+            final_screenshot = self.take_screenshot()
+            img_byte_arr = BytesIO()
+            final_screenshot.save(img_byte_arr, format='PNG')
+            final_base64 = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
+            img_byte_arr.close()
+
+            screenshots_dir = os.path.join(self.agent.file.agent_temp_dir, 'screenshots')
+            os.makedirs(screenshots_dir, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filepath = os.path.join(screenshots_dir, f"device_final_{timestamp}.png")
+            final_screenshot.save(filepath, format='PNG')
+            final_path = os.path.relpath(filepath, self.agent.file.agent_dir)
+
+            screenshots.append((final_path, final_base64))
+            actions_and_results.append((final_path, final_base64))
+            self.agent._log_and_report(f'Final Screen: {final_path}', actions_and_results, task_tag=task_tag)
+        except Exception as e:
+            error_msg = f"[WARNING] Failed to take final screenshot: {e}"
+            self.agent._log_and_report(error_msg)
+
+        return actions_and_results, screenshots
+
+    def _create_device_api_for_execution(self, notes, results, actions_and_results, note_screenshots):
         """
         Create a DeviceAPI object that can be used in code execution.
         This object provides the device control APIs while preventing direct access to internal state.
@@ -187,14 +215,16 @@ class DeviceControllerBase(UniInterface):
             notes: List to append text notes to
             results: List to append task results to
             actions_and_results: List to append actions and results (including images) to
+            note_screenshots: List to append (path, base64) tuples from take_note_screenshot
         """
         class DeviceAPI:
             """Device control API for task execution."""
-            def __init__(self, device_controller, notes, results, actions_and_results):
+            def __init__(self, device_controller, notes, results, actions_and_results, note_screenshots):
                 self._device = device_controller
                 self._notes = notes
                 self._results = results
                 self._actions_and_results = actions_and_results
+                self._note_screenshots = note_screenshots
                 self._task_status = 'ongoing'
 
             def end_task(self, status):
@@ -314,7 +344,8 @@ class DeviceControllerBase(UniInterface):
                 screenshot_count = sum(1 for item in self._actions_and_results if isinstance(item, tuple) and len(item) == 2)
                 screenshot_path = f"noted_image_{screenshot_count}.png"
 
-                # Add to actions_and_results as an image tuple
+                # Add to note_screenshots and actions_and_results
+                self._note_screenshots.append((screenshot_path, screenshot_base64))
                 self._actions_and_results.append((screenshot_path, screenshot_base64))
 
                 # Add text note with description
@@ -367,7 +398,7 @@ class DeviceControllerBase(UniInterface):
                 self._results.append((screenshot_path, screenshot_base64))
                 return screenshot
 
-        return DeviceAPI(self, notes, results, actions_and_results)
+        return DeviceAPI(self, notes, results, actions_and_results, note_screenshots)
 
     def _execute_device_action(self, action_str: str, device_type: str, notes: list):
         """

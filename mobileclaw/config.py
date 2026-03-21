@@ -39,11 +39,11 @@ class AgentConfig:
     phone_port_mappings: Dict[str, int] = field(default_factory=dict, metadata={"help": "Mapping of phone device names to port numbers, e.g. {'phone1': 51825, 'phone2': 51826}."})
     prefer_phone_action_type: str = field(default='websocket', metadata={"help": "Prefer phone input type."})
 
-    use_ruyix_service: bool = field(default=False, metadata={"help": "Whether to use RuyiX"})
-    ruyix_fm_name: str = field(default='ruyifm', metadata={"help": "Model name of the foundation model."})
-    ruyix_gui_vlm_name: str = field(default='ruyigui', metadata={"help": "Model name of the GUI VLM."})
-    ruyix_url: Optional[str] = field(default=None, metadata={"help": "API URL for RuyiX."})
-    ruyix_key: Optional[str] = field(default=None, metadata={"help": "API key for RuyiX."})
+    use_wisewk_service: bool = field(default=False, metadata={"help": "Whether to use Wisewk"})
+    wisewk_fm_name: str = field(default='ruyifm', metadata={"help": "Model name of the foundation model."})
+    wisewk_gui_vlm_name: str = field(default='ruyigui', metadata={"help": "Model name of the GUI VLM."})
+    wisewk_url: Optional[str] = field(default=None, metadata={"help": "API URL for Wisewk."})
+    wisewk_key: Optional[str] = field(default=None, metadata={"help": "API key for Wisewk."})
 
     use_custom_fm: bool = field(default=True, metadata={"help": "Whether to use Custom Foundation Model."})
     custom_fm_url: Optional[str] = field(default=None, metadata={"help": "API URL for Custom Foundation Model."})
@@ -76,6 +76,16 @@ class AgentConfig:
     chat_telegram_token: Optional[str] = field(default=None, metadata={"help": "Telegram bot token for chat."})
     chat_telegram_org_manager: Optional[str] = field(default=None, metadata={"help": "Telegram user_id of the org owner."})
     chat_telegram_proxy: Optional[str] = field(default=None, metadata={"help": "Proxy URL for Telegram (e.g., http://proxy:port)."})
+
+    chat_discord_token: Optional[str] = field(default=None, metadata={"help": "Discord bot token for chat."})
+    chat_discord_org_manager: Optional[str] = field(default=None, metadata={"help": "Discord user_id of the org owner."})
+
+    chat_whatsapp_bridge_url: Optional[str] = field(default='ws://localhost:18790', metadata={"help": "WebSocket URL for WhatsApp Node.js bridge."})
+    chat_whatsapp_org_manager: Optional[str] = field(default=None, metadata={"help": "WhatsApp sender_id of the org owner."})
+
+    chat_slack_bot_token: Optional[str] = field(default=None, metadata={"help": "Slack bot token (xoxb-...) for chat."})
+    chat_slack_app_token: Optional[str] = field(default=None, metadata={"help": "Slack app-level token (xapp-...) for Socket Mode."})
+    chat_slack_org_manager: Optional[str] = field(default=None, metadata={"help": "Slack user_id of the org owner."})
 
     save_query_for_debug: bool = field(default=False, metadata={"help": "Whether to save model query prompts and responses for debugging."})
     run_with_ide: bool = field(default=False, metadata={"help": "Whether to run as a submodule of IDE."})
@@ -444,7 +454,7 @@ def CustomArg(
     @dataclass
     class Args:
         regular_arg: str = dataclasses.field(default="abc", metadata={"aliases": ["--example", "-e"], "help": "This syntax could be better!"})
-        ruyi_arg: str = CustomArg(default="abc", aliases=["--example", "-e"], help="What a nice syntax!")
+        custom_arg: str = CustomArg(default="abc", aliases=["--example", "-e"], help="What a nice syntax!")
     ```
 
     Args:

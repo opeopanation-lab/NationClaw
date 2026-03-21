@@ -708,8 +708,8 @@ Task: {current_task}
 
     def print_model_configuration(self):
         """Print model configuration information used in the execution script."""
-        if getattr(self.config, 'use_ruyix_service', False):
-            logger.info("✅ Using RuyiX service")
+        if getattr(self.config, 'use_wisewk_service', False):
+            logger.info("✅ Using Wisewk service")
         if getattr(self.config, 'use_custom_fm', False):
             logger.info("✅ Using custom FM model")
         if getattr(self.config, 'use_custom_gui_vlm', False):
@@ -729,33 +729,34 @@ Task: {current_task}
     def do_with_device(self, task, device=None):
         """
         Execute a task on a device.
-        # TODO pass exception to caller
 
         Args:
             task: Natural language description of what to do
             device: The name/id of an available device
 
         Returns:
-            list: Information collected during task execution (list of text notes and images)
+            tuple: (actions_and_results, screenshots)
+                - actions_and_results: list of text strings and image tuples
+                - screenshots: list of (screen_path, screen_base64) tuples
         """
         device_obj = self.device_manager.get_device(device)
         if not device_obj:
             logger.error(f"Device not found: {device}")
-            return [f"Error: Device '{device}' not found"]
+            return [f"Error: Device '{device}' not found"], []
 
         try:
-            results = device_obj.execute_task(task)
-            return results
+            actions_and_results, screenshots = device_obj.execute_task(task)
+            return actions_and_results, screenshots
         except Exception as e:
             logger.error(f"Error executing instruction on device: {e}")
-            return [f"Error: {str(e)}"]
+            return [f"Error: {str(e)}"], []
 
     def query_model(self, params, model_name=None):
         """
         Query the foundation model.
 
         Args:
-            params: List of query parameters (text, image, etc.)
+            params: List of query parameters (text, image, file_path, etc.)
             model_name: Specifies the preferred model to use in this query
 
         Returns:
@@ -765,10 +766,35 @@ Task: {current_task}
         if isinstance(params, str):
             params = [params]
 
+        # Load file paths in params
+        IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.tiff'}
+        TEXT_EXTENSIONS = {'.md', '.txt', '.csv', '.json', '.xml', '.html', '.yaml', '.yml', '.log'}
+        resolved_params = []
+        for item in params:
+            if isinstance(item, str) and not item.startswith(('http://', 'https://')):
+                path = item if os.path.isabs(item) else os.path.join(self.file.agent_dir, item)
+                if os.path.isfile(path):
+                    ext = os.path.splitext(path)[1].lower()
+                    if ext in IMAGE_EXTENSIONS:
+                        import base64
+                        from io import BytesIO
+                        from PIL import Image
+                        img = Image.open(path)
+                        buf = BytesIO()
+                        img.save(buf, format='PNG')
+                        base64_str = base64.b64encode(buf.getvalue()).decode('utf-8')
+                        resolved_params.append((path, base64_str))
+                        continue
+                    elif ext in TEXT_EXTENSIONS:
+                        with open(path, 'r', encoding='utf-8') as f:
+                            resolved_params.append(f.read())
+                        continue
+            resolved_params.append(item)
+
         try:
             # Use the query_model function from function_hub_local
             response = self.fm.call_func('query_model', {
-                'query': params,
+                'query': resolved_params,
                 'model_name': model_name or 'default'
             })
 
@@ -886,8 +912,6 @@ Task: {current_task}
                 """Log output using the unified _log_and_report with Step N Output prefix."""
                 if isinstance(content, tuple) and len(content) == 2:
                     # Image tuple — append the image into the list
-                    text = f"{self._indent}Step {self._current_step} Output: {content[0]}"
-                    self._agent._log_and_report(text, self._actions_and_results, self._task_tag)
                     self._actions_and_results.append(content)
                 else:
                     text = f"{self._indent}Step {self._current_step} Output: {content}"
@@ -896,7 +920,7 @@ Task: {current_task}
             def _capture_result(self, api_name, result):
                 """Capture API return value into actions_and_results via _log_output."""
                 if result is None:
-                    self._log_output(f"{api_name} returned")
+                    self._log_output(f"{api_name} finished")
                     return
 
                 # Handle list results that may contain image tuples
@@ -924,7 +948,7 @@ Task: {current_task}
                     try:
                         temp_dir = self._agent.file.agent_temp_dir
                         os.makedirs(temp_dir, exist_ok=True)
-                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         filename = f"result_{api_name}_{timestamp}.md"
                         filepath = os.path.join(temp_dir, filename)
                         with open(filepath, 'w', encoding='utf-8') as f:
@@ -949,7 +973,7 @@ Task: {current_task}
                 try:
                     screenshots_dir = os.path.join(self._agent.file.agent_temp_dir, 'screenshots')
                     os.makedirs(screenshots_dir, exist_ok=True)
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     filename = f"{label}_{timestamp}.png"
                     filepath = os.path.join(screenshots_dir, filename)
                     screenshot.save(filepath, format='PNG')
@@ -957,26 +981,45 @@ Task: {current_task}
                 except Exception as e:
                     logger.warning(f"Failed to save screenshot to file: {e}")
                     rel_path = f"{label}_{datetime.now().strftime('%H%M%S')}"
-                self._log_output((rel_path, base64_str))
+                return rel_path, base64_str
 
             def do_with_device(self, task, device=None):
                 self._check_call_count()
                 if self._mode in ['handle_message', 'conclude_task']:
                     raise Exception(f"do_with_device is not allowed in {self._mode} mode.")
-                result = self._agent.do_with_device(task, device=device)
-                self._capture_result('do_with_device', result)
-                # Save a screenshot after finishing the device task
-                try:
-                    if device:
-                        device_obj = self._agent.device_manager.get_device(device)
-                    else:
-                        device_obj = self._agent.device_manager.get_first_device()
-                    if device_obj:
-                        screenshot = device_obj.take_screenshot()
-                        if screenshot is not None:
-                            self._save_screenshot(screenshot, label=device or 'device')
-                except Exception as e:
-                    logger.debug(f"Could not capture post-action screenshot: {e}")
+                device_steps, device_screenshots = self._agent.do_with_device(task, device=device)
+                # Store trajectory for infer_from_last_trajectory
+                self._last_device_steps = device_steps
+                # Get the post-action screen from device_screenshots
+                if device_screenshots:
+                    last_path, last_base64 = device_screenshots[-1]
+                    self._log_output((last_path, last_base64))
+                # Build a string summary from text entries in device_actions
+                result_text = '\n'.join(
+                    item for item in device_steps if isinstance(item, str)
+                )
+                result_text += f'\nYou can get more detailed information from this trace (intermediate screenshots included) by calling `agent.infer_from_last_trajectory`'
+                self._capture_result('do_with_device', result_text)
+                return result_text
+
+            def infer_from_last_trajectory(self, question):
+                """Infer information from the last device action trajectory.
+
+                Args:
+                    question: The question to answer based on the trajectory.
+                """
+                self._check_call_count()
+                if not hasattr(self, '_last_device_steps') or not self._last_device_steps:
+                    raise Exception("No device trajectory available. Call do_with_device first.")
+                # Build query params: text + images from the trajectory
+                params = [f"Based on the following device action trajectory, answer this question: {question}\n\n# Trajectory\n"]
+                for item in self._last_device_steps:
+                    if isinstance(item, str):
+                        params.append(item + '\n')
+                    elif isinstance(item, tuple) and len(item) == 2:
+                        params.append(item)
+                result = self._agent.query_model(params)
+                self._capture_result('infer_from_last_trajectory', result)
                 return result
 
             def query_model(self, params, model_name=None):
@@ -1022,16 +1065,15 @@ Task: {current_task}
                     device: Name/id of the device. If None, uses the first available device.
                 """
                 self._check_call_count()
-                if device:
-                    device_obj = self._agent.device_manager.get_device(device)
-                else:
-                    device_obj = self._agent.device_manager.get_first_device()
+                device_obj = self._agent.device_manager.get_device(device)
                 if not device_obj:
                     raise Exception(f"Device not found: {device}")
                 screenshot = device_obj.take_screenshot()
                 if screenshot is None:
                     raise Exception(f"Failed to take screenshot from device: {device}")
-                self._save_screenshot(screenshot, label=device or 'device_screen')
+                rel_path, base64_str = self._save_screenshot(screenshot, label=device or 'device_screen')
+                self._log_output(f'Current screen: {rel_path}')
+                self._log_output((rel_path, base64_str))
 
             def read_image(self, image_path):
                 """Read an image file and include it in the next step's context.
@@ -1049,7 +1091,10 @@ Task: {current_task}
                 buf = BytesIO()
                 img.save(buf, format='PNG')
                 base64_str = base64.b64encode(buf.getvalue()).decode('utf-8')
-                self._log_output((image_path, base64_str))
+                rel_path = os.path.relpath(image_path, self._agent.file.agent_dir)
+                result_text = f'Image loaded: {rel_path}'
+                self._log_output(result_text)
+                self._log_output((rel_path, base64_str))
 
         return AgentAPI(self, actions_and_results, recursion_depth, mode, task_tag, indent)
 
