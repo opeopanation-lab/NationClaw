@@ -41,9 +41,16 @@ class AutoAgent:
         self._message_queue = queue.Queue()
         self._message_handling_lock = threading.Lock()
         self._handling_message = False
+        self._message_handling_thread = None
         self._message_pause_event = threading.Event()
         self._message_pause_event.set()  # Initially not paused
         self._wake_event = threading.Event()  # For interrupting adaptive sleep
+        self._state_lock = threading.RLock()
+        self._serve_thread = None
+        self._serve_stopped_event = threading.Event()
+        self._serve_stopped_event.set()
+        self._stopping = False
+        self._interfaces_closed = False
 
         self.start()
 
@@ -53,10 +60,67 @@ class AutoAgent:
         self.file._open()
 
     def stop(self):
-        self._enabled = False
-        self.fm._close()
-        self.chat._close()
-        self.file._close()
+        serve_thread = None
+        should_close_here = False
+
+        with self._state_lock:
+            if self._interfaces_closed:
+                return
+
+            self._stopping = True
+            self._enabled = False
+            self._message_pause_event.set()
+            self._wake_event.set()
+            serve_thread = self._serve_thread
+            current_thread = threading.current_thread()
+            should_close_here = (
+                serve_thread is None
+                or not serve_thread.is_alive()
+                or serve_thread is current_thread
+            )
+
+        if serve_thread is not None and serve_thread.is_alive() and not should_close_here:
+            self._serve_stopped_event.wait()
+            serve_thread.join()
+
+        message_thread = self._message_handling_thread
+        if (
+            message_thread is not None
+            and message_thread is not threading.current_thread()
+        ):
+            with self._message_handling_lock:
+                pass
+
+        if should_close_here:
+            self._close_interfaces_once()
+
+    def _close_interfaces_once(self):
+        with self._state_lock:
+            if self._interfaces_closed:
+                return
+            self._interfaces_closed = True
+
+        close_errors = []
+        for interface_name, interface in (
+            ('device_manager', self.device_manager),
+            ('fm', self.fm),
+            ('chat', self.chat),
+            ('file', self.file),
+        ):
+            try:
+                interface._close()
+            except Exception as e:
+                close_errors.append((interface_name, e))
+                logger.exception(f"Failed to close {interface_name}: {e}")
+
+        if close_errors:
+            raise RuntimeError(
+                "Failed to close interfaces cleanly: "
+                + ", ".join(f"{name}: {err}" for name, err in close_errors)
+            )
+
+    def _shutdown_requested(self):
+        return self._stopping or (not self._enabled)
 
     def _adaptive_sleep(self):
         """Adaptive sleep based on idle task count.
@@ -70,9 +134,24 @@ class AutoAgent:
         """
         Start agent serving.
         """
-        while self._enabled:
-            self.execute_task('Complete pending tasks or do your routine work.')
-            self._adaptive_sleep()
+        current_thread = threading.current_thread()
+        with self._state_lock:
+            self._serve_thread = current_thread
+            self._serve_stopped_event.clear()
+
+        try:
+            while not self._shutdown_requested():
+                self.execute_task('Complete pending tasks or do your routine work.')
+                if self._shutdown_requested():
+                    break
+                self._adaptive_sleep()
+        finally:
+            with self._state_lock:
+                if self._serve_thread is current_thread:
+                    self._serve_thread = None
+                self._serve_stopped_event.set()
+            if self._stopping:
+                self._close_interfaces_once()
 
     def _log_and_report(self, content, actions_and_results, task_tag="📋"):
         """
@@ -261,9 +340,18 @@ class AutoAgent:
             finished_step = -1
 
             for step in range(max_steps):
+                if self._shutdown_requested():
+                    self._log_and_report(f'{indent}Task interrupted because agent is stopping.', actions_and_results, task_tag)
+                    break
+
                 # Pause normal tasks if a message is being handled
                 if mode == 'normal':
-                    self._message_pause_event.wait()
+                    while not self._shutdown_requested():
+                        if self._message_pause_event.wait(timeout=0.2):
+                            break
+                    if self._shutdown_requested():
+                        self._log_and_report(f'{indent}Task interrupted because agent is stopping.', actions_and_results, task_tag)
+                        break
 
                 if len(actions_and_results) > self.actions_and_results_max_len:
                     actions_and_results = actions_and_results[-self.actions_and_results_max_len:]
@@ -286,6 +374,10 @@ class AutoAgent:
 
                 # Call model to generate step code
                 thought, code = self.fm.call_func('task_step', params)
+
+                if self._shutdown_requested():
+                    self._log_and_report(f'{indent}Task interrupted because agent is stopping.', actions_and_results, task_tag)
+                    break
 
                 # Add thought to results
                 if thought:
@@ -361,7 +453,10 @@ class AutoAgent:
         # Acquire lock to ensure only one message is handled at a time
         # If another message is being handled, this will wait
         with self._message_handling_lock:
+            if self._shutdown_requested():
+                return ['Agent is stopping. Message handling skipped.']
             try:
+                self._message_handling_thread = threading.current_thread()
                 # Pause normal tasks while handling message
                 self._message_pause_event.clear()
                 self._wake_event.set()  # Wake up from adaptive sleep immediately
@@ -409,6 +504,7 @@ Task: {current_task}
 
             finally:
                 # Resume normal tasks after handling message
+                self._message_handling_thread = None
                 self._handling_message = False
                 self._message_pause_event.set()
         
@@ -435,7 +531,13 @@ Task: {current_task}
     def _sleep(self, seconds: float):
         """Let the agent sleep for several seconds, but can be interrupted."""
         self._wake_event.clear()
-        self._wake_event.wait(timeout=seconds)
+        end_time = time.time() + max(seconds, 0)
+        while not self._shutdown_requested():
+            remaining = end_time - time.time()
+            if remaining <= 0:
+                break
+            if self._wake_event.wait(timeout=min(remaining, 0.2)):
+                break
 
     def _initialize_working_dir(self):
         """Initialize the working directory structure based on the template."""
@@ -1097,4 +1199,3 @@ Task: {current_task}
                 self._log_output((rel_path, base64_str))
 
         return AgentAPI(self, actions_and_results, recursion_depth, mode, task_tag, indent)
-

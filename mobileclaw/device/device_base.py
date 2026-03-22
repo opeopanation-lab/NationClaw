@@ -90,9 +90,18 @@ class DeviceControllerBase(UniInterface):
         device_api = self._create_device_api_for_execution(notes, results, actions_and_results, note_screenshots)
 
         for step in range(max_steps):
+            if not self.agent._enabled:
+                self.agent._log_and_report('Device task interrupted because agent is stopping.', actions_and_results, task_tag=task_tag)
+                break
+
             # Pause if a message is being handled
             if hasattr(self.agent, '_message_pause_event'):
-                self.agent._message_pause_event.wait()
+                while self.agent._enabled:
+                    if self.agent._message_pause_event.wait(timeout=0.2):
+                        break
+                if not self.agent._enabled:
+                    self.agent._log_and_report('Device task interrupted because agent is stopping.', actions_and_results, task_tag=task_tag)
+                    break
 
             # Take screenshot
             screenshot = self.take_screenshot()
@@ -137,6 +146,10 @@ class DeviceControllerBase(UniInterface):
 
             # Call device_use_step API
             thought, code = self.agent.fm.call_func('device_use_step', params)
+
+            if not self.agent._enabled:
+                self.agent._log_and_report('Device task interrupted because agent is stopping.', actions_and_results, task_tag=task_tag)
+                break
 
             # Store screenshot in actions_and_results for history
             actions_and_results.append((screen_path, screenshot_base64))
@@ -1463,4 +1476,3 @@ class DeviceControllerBase(UniInterface):
         # Default to 10 FPS (0.1 second interval)
         # This can be overridden by device-specific implementations
         return 0.1
-

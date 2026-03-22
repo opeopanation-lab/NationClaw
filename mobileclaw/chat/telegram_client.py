@@ -4,8 +4,10 @@ The Telegram chat client implementation.
 import asyncio
 import re
 import os
+from collections import defaultdict, deque
+from datetime import datetime
 from pathlib import Path
-from threading import Thread
+from threading import Lock, Thread
 import structlog
 
 from mobileclaw.utils.interface import UniInterface
@@ -104,10 +106,46 @@ class Telegram_Client(Chat_Client):
         self._loop = None
         # Maintain mapping of sender_id to chat_id for replies
         self._chat_ids = {}  # {sender_id: chat_id}
+        self._chat_history = defaultdict(lambda: deque(maxlen=20))
+        self._history_lock = Lock()
         # Log receiver for send_to_log messages
         self.log_receiver = None  # Set via /log_here command
         # Report receiver for send_message when receiver is None
         self.report_receiver = None  # Set via /report_here command
+
+    def _set_org_manager_if_missing(self, attr_name, config_name, sender_id):
+        """Persist the first Telegram sender as org manager when not configured."""
+        current_value = getattr(self, attr_name, None)
+        if current_value not in (None, "", "?"):
+            return
+
+        setattr(self, attr_name, sender_id)
+        if hasattr(self.agent.config, config_name):
+            setattr(self.agent.config, config_name, sender_id)
+
+        logger.info(f"Telegram org manager initialized to {sender_id}")
+
+    def _remember_chat_id(self, sender_id, chat_id):
+        """Cache chat_id for both raw numeric ID and username-qualified ID."""
+        sender_id = str(sender_id)
+        chat_id = str(chat_id)
+        self._chat_ids[sender_id] = chat_id
+
+        numeric_sender_id = sender_id.split('|', 1)[0]
+        self._chat_ids[numeric_sender_id] = chat_id
+
+    def _resolve_chat_id(self, receiver):
+        """Resolve a receiver identifier to a known Telegram chat_id."""
+        if receiver is None:
+            return None
+
+        receiver = str(receiver)
+        chat_id = self._chat_ids.get(receiver)
+        if chat_id:
+            return chat_id
+
+        numeric_receiver = receiver.split('|', 1)[0]
+        return self._chat_ids.get(numeric_receiver)
 
     def _open(self):
         if not TELEGRAM_AVAILABLE:
@@ -329,7 +367,13 @@ class Telegram_Client(Chat_Client):
             sender_id = f"{sender_id}|{user.username}"
 
         # Store chat_id for replies
-        self._chat_ids[sender_id] = chat_id
+        self._remember_chat_id(sender_id, chat_id)
+
+        self._set_org_manager_if_missing(
+            'org_manager_user_id',
+            'chat_telegram_org_manager',
+            sender_id,
+        )
 
         # Build content from text and/or media
         content_parts = []
@@ -383,19 +427,21 @@ class Telegram_Client(Chat_Client):
 
         # Create a simple message object
         class SimpleMessage:
-            def __init__(self, msg_id, sender, content):
+            def __init__(self, msg_id, sender, content, chat_id):
                 self.message_id = msg_id
                 self.sender = sender
                 self.content = content
+                self.chat_id = chat_id
 
-        msg = SimpleMessage(message.message_id, sender_id, content)
-
-        # Get message history (empty for now)
-        history = []
+        msg = SimpleMessage(message.message_id, sender_id, content, chat_id)
+        history_messages = self.get_history_messages(msg)
+        history = "\n".join([f'[{m[2]}] {m[0]}: {m[1]}' for m in history_messages])
+        self._append_history(chat_id, sender_id, content)
 
         # Call agent's message handler
         if hasattr(self.agent, 'handle_message'):
-            self.agent.handle_message(
+            await asyncio.to_thread(
+                self.agent.handle_message,
                 message=content,
                 history=history,
                 sender=sender_id,
@@ -441,7 +487,7 @@ class Telegram_Client(Chat_Client):
             return
 
         # Get chat_id from mapping or use receiver directly
-        chat_id = self._chat_ids.get(receiver, None)
+        chat_id = self._resolve_chat_id(receiver)
         if not chat_id:
             logger.warning(f'send_message failed. chat_id unavailable {receiver}')
             return
@@ -449,10 +495,18 @@ class Telegram_Client(Chat_Client):
         try:
             # Run async operation in thread-safe way
             if self._loop and self._loop.is_running():
-                asyncio.run_coroutine_threadsafe(
+                future = asyncio.run_coroutine_threadsafe(
                     self._async_send_message(message, chat_id),
                     self._loop
-                ).result(timeout=10)
+                )
+
+                def _log_send_result(done_future):
+                    try:
+                        done_future.result()
+                    except Exception as e:
+                        logger.exception(f'Error sending Telegram message: {e}')
+
+                future.add_done_callback(_log_send_result)
             else:
                 # Fallback: create new event loop
                 loop = asyncio.new_event_loop()
@@ -466,8 +520,9 @@ class Telegram_Client(Chat_Client):
     async def _async_send_message(self, message, chat_id):
         """Async helper to send message."""
         try:
+            plain_message = str(message)
             # Convert markdown to Telegram HTML
-            html_content = _markdown_to_telegram_html(message)
+            html_content = _markdown_to_telegram_html(plain_message)
 
             try:
                 await self._app.bot.send_message(
@@ -480,8 +535,9 @@ class Telegram_Client(Chat_Client):
                 logger.warning(f'HTML parse failed, falling back to plain text: {e}')
                 await self._app.bot.send_message(
                     chat_id=int(chat_id),
-                    text=message
+                    text=plain_message
                 )
+            self._append_history(str(chat_id), 'assistant', plain_message)
         except Exception as e:
             logger.error(f'Error in async send: {e}')
             raise
@@ -517,6 +573,20 @@ class Telegram_Client(Chat_Client):
             logger.exception(f'Error sending to log receiver: {e}')
 
     def get_history_messages(self, msg, max_previous_messages=10):
-        """Get message history. Returns empty list as Telegram bot API doesn't provide easy history access."""
-        return []
+        """Get recent cached message history for the current chat."""
+        chat_id = getattr(msg, 'chat_id', None)
+        if chat_id is None:
+            sender = getattr(msg, 'sender', None)
+            chat_id = self._chat_ids.get(sender)
+        if chat_id is None:
+            return []
 
+        with self._history_lock:
+            history = list(self._chat_history.get(str(chat_id), []))
+        return history[-max_previous_messages:]
+
+    def _append_history(self, chat_id, sender, content):
+        """Append one message to in-memory chat history."""
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        with self._history_lock:
+            self._chat_history[str(chat_id)].append((str(sender), str(content), timestamp))

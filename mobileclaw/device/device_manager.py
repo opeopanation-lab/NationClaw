@@ -31,6 +31,21 @@ class DeviceManager(UniInterface):
     def __str__(self) -> str:
         return "设备管理器"
 
+    def _close(self):
+        close_errors = []
+        for device_name, device in list(self._device_instances.items()):
+            try:
+                device._close()
+            except Exception as e:
+                close_errors.append((device_name, e))
+                logger.exception(f"关闭设备 {device_name} 失败: {e}")
+        self._device_instances.clear()
+        if close_errors:
+            raise RuntimeError(
+                "Failed to close devices cleanly: "
+                + ", ".join(f"{name}: {err}" for name, err in close_errors)
+            )
+
     @staticmethod
     def _normalize_name(name: str) -> str:
         return (name or '').lower().replace('_', ' ').replace('-', ' ').strip()

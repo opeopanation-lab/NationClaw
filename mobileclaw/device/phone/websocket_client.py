@@ -132,7 +132,14 @@ class WebSocketClient:
 
     def close(self):
         self._closing = True
-        self.ws.close()
+        self.response_event.set()
+        self.is_running.set()
+        try:
+            self.ws.close()
+        finally:
+            thread = getattr(self, "thread", None)
+            if thread and thread.is_alive() and thread is not threading.current_thread():
+                thread.join(timeout=5)
 
 
 if __name__ == "__main__":
