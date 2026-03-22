@@ -12,8 +12,8 @@ setup(
     author='MobileClaw Team',
     license='CUSTOM',
     author_email='li.yuanchun@foxmail.com',
-    url='https://github.com/MobileLLM/MobileClaw',  # use the URL to the github repo
-    download_url='https://github.com/MobileLLM/MobileClaw/tarball/0.0.1a1',
+    url='https://github.com/MobileClaw/MobileClaw',  # use the URL to the github repo
+    download_url='https://github.com/MobileClaw/MobileClaw/tarball/0.0.1a1',
     keywords=['AI', 'agent', 'mobile', 'framework', 'LLM'],  # arbitrary keywords
     classifiers=[
         # How mature is this project? Common values are

@@ -126,10 +126,16 @@ class FunctionHubLocal(UniInterface):
 
         if model_name and model_name != 'default':
             api_model_name = model_name
-        data = {
-            "model": api_model_name,
-            "messages": messages
-        }
+        if self._is_responses_api(api_url):
+            data = {
+                "model": api_model_name,
+                "input": self._convert_messages_to_responses_input(messages)
+            }
+        else:
+            data = {
+                "model": api_model_name,
+                "messages": messages
+            }
 
         if not retry:
             retry = self._retry
@@ -165,8 +171,8 @@ class FunctionHubLocal(UniInterface):
                     continue
 
                 # 解析返回结果
-                if "choices" in result and len(result["choices"]) > 0:
-                    content = result["choices"][0]["message"]["content"]
+                content = self._extract_response_content(result)
+                if content is not None:
                     logger.debug(f"API returned: {content[:200] if content else '(empty)'}...")
 
                     # Save debug query if enabled
@@ -197,6 +203,63 @@ class FunctionHubLocal(UniInterface):
                 logger.error(f"❌ API exception: {type(e).__name__}: {e}")
 
         logger.error(f"❌ {api_model_name} calling failed")
+        return None
+
+    def _is_responses_api(self, api_url: str) -> bool:
+        return '/responses' in api_url.rstrip('/')
+
+    def _convert_messages_to_responses_input(self, messages: list[dict]) -> list[dict]:
+        input_items = []
+        for message in messages:
+            role = message.get('role', 'user')
+            content = message.get('content', '')
+
+            if isinstance(content, str):
+                converted_content = [{"type": "input_text", "text": content}]
+            else:
+                converted_content = []
+                for part in content:
+                    part_type = part.get('type')
+                    if part_type == 'text':
+                        converted_content.append({
+                            "type": "input_text",
+                            "text": part.get('text', '')
+                        })
+                    elif part_type == 'image_url':
+                        image_url = part.get('image_url', {})
+                        converted_content.append({
+                            "type": "input_image",
+                            "image_url": image_url.get('url', '')
+                        })
+                    else:
+                        converted_content.append(part)
+
+            input_items.append({
+                "role": role,
+                "content": converted_content
+            })
+
+        return input_items
+
+    def _extract_response_content(self, result: dict) -> Optional[str]:
+        if "choices" in result and len(result["choices"]) > 0:
+            return result["choices"][0]["message"]["content"]
+
+        if isinstance(result.get("output_text"), str):
+            return result["output_text"]
+
+        output_items = result.get("output", [])
+        text_parts = []
+        for output_item in output_items:
+            if output_item.get("type") != "message":
+                continue
+            for content_item in output_item.get("content", []):
+                if content_item.get("type") == "output_text" and "text" in content_item:
+                    text_parts.append(content_item["text"])
+
+        if text_parts:
+            return "\n".join(text_parts)
+
         return None
     
     # ==================== memory.retrieve API ====================
@@ -1038,4 +1101,3 @@ Note:
             logger.debug(f"Response content: {response[:500]}")
 
         return thought, code
-
