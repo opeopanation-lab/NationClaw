@@ -39,6 +39,8 @@ class DeviceControllerBase(UniInterface):
         self.recording_action_timeline = []  # Store action events during recording
         self.recording_frame_actions = {}      # Map frame_number -> action_events
         self.recording_action_counter = 0      # Unique action identifier
+        self._last_model_input_scale_x = 1.0
+        self._last_model_input_scale_y = 1.0
 
     def __str__(self) -> str:
         return f"Device Interface: {self.device_name}"
@@ -68,6 +70,8 @@ class DeviceControllerBase(UniInterface):
         actions_and_results = []
         screenshots = []  # List of (screen_path, screen_base64) tuples from each step
         note_screenshots = []  # List of (path, base64) tuples from take_note_screenshot
+        self._last_model_input_scale_x = 1.0
+        self._last_model_input_scale_y = 1.0
 
         # Get device type
         from mobileclaw.device.computer import ComputerDeviceBase
@@ -106,9 +110,13 @@ class DeviceControllerBase(UniInterface):
             # Take screenshot
             screenshot = self.take_screenshot()
 
+            model_screenshot, scale_x, scale_y = self._prepare_screenshot_for_model(screenshot)
+            self._last_model_input_scale_x = scale_x
+            self._last_model_input_scale_y = scale_y
+
             # Save screenshot to temp file and convert to base64
             img_byte_arr = BytesIO()
-            screenshot.save(img_byte_arr, format='PNG')
+            model_screenshot.save(img_byte_arr, format='PNG')
             img_bytes = img_byte_arr.getvalue()
             screenshot_base64 = base64.b64encode(img_bytes).decode('utf-8')
             img_byte_arr.close()
@@ -560,41 +568,79 @@ class DeviceControllerBase(UniInterface):
         """
         return (self.width, self.height)
 
+    def _prepare_screenshot_for_model(self, screenshot: Image.Image) -> tuple[Image.Image, float, float]:
+        max_size = getattr(self.agent.config, 'gui_max_screenshot_width', 1200) or 1200
+        original_width, original_height = screenshot.size
+        longest_side = max(original_width, original_height)
+
+        if longest_side <= max_size:
+            return screenshot, 1.0, 1.0
+
+        resize_ratio = max_size / longest_side
+        resized_width = max(1, int(round(original_width * resize_ratio)))
+        resized_height = max(1, int(round(original_height * resize_ratio)))
+        resized = screenshot.resize((resized_width, resized_height), Image.Resampling.LANCZOS)
+        logger.debug(
+            f"Resize screenshot for model: {original_width}x{original_height} -> {resized_width}x{resized_height}"
+        )
+        return resized, resized_width / original_width, resized_height / original_height
+
+    def _is_scaled_coordinate_model(self) -> bool:
+        mode = getattr(self.agent.config, 'gui_coordinate_scale_mode', 'auto')
+        if mode == 'always':
+            return True
+        if mode == 'never':
+            return False
+
+        gui_vlm_name = ''
+        if getattr(self.agent.config, 'use_custom_gui_vlm', False):
+            gui_vlm_name = getattr(self.agent.config, 'custom_gui_vlm_name', '') or ''
+        else:
+            gui_vlm_name = getattr(self.agent.config, 'wisewk_gui_vlm_name', '') or ''
+
+        gui_vlm_name = gui_vlm_name.lower()
+        return 'seed' in gui_vlm_name
+
     def _scale_coordinates_if_needed(self, x: int, y: int) -> tuple:
         """
-        Scale coordinates from model output space (1000x1000) to actual device dimensions.
+        Restore model coordinates to actual device dimensions.
 
         Args:
-            x: X coordinate from model (in 1000x1000 space)
-            y: Y coordinate from model (in 1000x1000 space)
+            x: X coordinate from model
+            y: Y coordinate from model
 
         Returns:
             tuple: (scaled_x, scaled_y) in actual device coordinates
         """
-        # Model outputs coordinates in 1000x1000 space
-        model_width = 1000
-        model_height = 1000
-
-        # Get actual device dimensions using get_width_height() method
         device_width, device_height = self.get_width_height()
 
         if device_width <= 0 or device_height <= 0:
             logger.error(f"Invalid device dimensions (width={device_width}, height={device_height}), using original coordinates")
             return (0, 0)
 
-        # Calculate scaling ratios
-        scale_x = device_width / model_width
-        scale_y = device_height / model_height
-
-        # Apply scaling
-        scaled_x = int(x * scale_x)
-        scaled_y = int(y * scale_y)
+        if self._is_scaled_coordinate_model():
+            model_width = 1000
+            model_height = 1000
+            scale_x = device_width / model_width
+            scale_y = device_height / model_height
+            scaled_x = int(x * scale_x)
+            scaled_y = int(y * scale_y)
+            logger.debug(
+                f"Seed coordinate scaling: ({x}, {y}) -> ({scaled_x}, {scaled_y}) (device: {device_width}x{device_height})"
+            )
+        else:
+            input_scale_x = getattr(self, '_last_model_input_scale_x', 1.0) or 1.0
+            input_scale_y = getattr(self, '_last_model_input_scale_y', 1.0) or 1.0
+            scaled_x = int(x / input_scale_x)
+            scaled_y = int(y / input_scale_y)
+            logger.debug(
+                f"Restore image coordinates: ({x}, {y}) -> ({scaled_x}, {scaled_y}) "
+                f"(input_scale={input_scale_x:.4f},{input_scale_y:.4f}, device: {device_width}x{device_height})"
+            )
 
         # Ensure coordinates are within device bounds
         scaled_x = max(0, min(scaled_x, device_width - 1))
         scaled_y = max(0, min(scaled_y, device_height - 1))
-
-        logger.debug(f"Coordinate scaling: ({x}, {y}) -> ({scaled_x}, {scaled_y}) (device: {device_width}x{device_height})")
         return (scaled_x, scaled_y)
 
     def _open(self):

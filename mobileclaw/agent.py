@@ -385,7 +385,7 @@ class AutoAgent:
 
                 # Stop if no code generated
                 if not code:
-                    self._log_and_report(f'{indent}Step {step} Action: (WARNING - no code parsed)', actions_and_results, task_tag)
+                    self._log_and_report(f'{indent}Step {step} Action: (WARNING - no code parsed. Perhaps forgot to wrap code with ```?)', actions_and_results, task_tag)
                     continue
 
                 code_line = f'{indent}Step {step} Action:\n```\n{code}\n```'

@@ -482,9 +482,21 @@ class Lark_Client(Chat_Client):
             if receiver is None:
                 # Use report_receiver if set, otherwise default to org_manager
                 if self.report_receiver:
-                    receiver = f"group:{self.report_receiver}"
+                    report_receiver = str(self.report_receiver)
+                    if report_receiver.startswith("group:"):
+                        receiver = report_receiver
+                    else:
+                        receiver = f"group:{report_receiver}"
                 else:
                     receiver = self.org_manager_open_id
+
+            if not receiver:
+                logger.warning(
+                    'send_message failed. receiver unavailable',
+                    action='send_message',
+                    status='failed',
+                )
+                return None
 
             # Check if receiver has "group:" prefix
             if receiver.startswith("group:"):
@@ -721,4 +733,3 @@ class Lark_Client(Chat_Client):
             self.send_message(message, receiver=f"group:{self.log_receiver}", subject=subject)
         except Exception as e:
             logger.exception(f'Error sending to log receiver: {e}')
-

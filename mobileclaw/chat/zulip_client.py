@@ -216,6 +216,15 @@ class Zulip_Client(Chat_Client):
                     receiver = self.report_receiver
                 else:
                     receiver = self.org_manager_email
+
+            if not receiver:
+                logger.warning(
+                    'send_message failed. receiver unavailable',
+                    action='send_message',
+                    status='failed',
+                )
+                return None
+
             # Check if receiver has "group:" prefix
             if receiver.startswith("group:"):
                 # Stream message - remove the prefix
@@ -452,4 +461,3 @@ class Zulip_Client(Chat_Client):
                 self.send_message(message, receiver=self.log_receiver, subject=subject)
             except Exception as e:
                 logger.exception(f'Error sending to log receiver: {e}')
-

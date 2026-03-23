@@ -129,7 +129,8 @@ class FunctionHubLocal(UniInterface):
         if self._is_responses_api(api_url):
             data = {
                 "model": api_model_name,
-                "input": self._convert_messages_to_responses_input(messages)
+                "input": self._convert_messages_to_responses_input(messages),
+                # "reasoning": {"effort": "medium"}
             }
         else:
             data = {
@@ -844,7 +845,7 @@ The following device control methods are available through the `device` object:
 
 You should analyze the current screenshot and situation based on actions already performed, then decide the next action to take toward completing the task.
 
-Your response should be a brief paragraph (<50 words, prefixed with "Thought:") describing what you plan to do next, followed by Python code that executes an action.
+Your response should be a brief paragraph (<50 words, prefixed with "Thought:") describing what you plan to do next, followed by Python code wrapped in ``` block that executes an action.
 
 The code will have access to:
 - `device`: The device controller object with control methods
@@ -1056,7 +1057,7 @@ The following skills provide domain-specific knowledge and procedures. Read the 
 ## Your Response
 
 You need to decide the next action to take toward completing the task. You need to understand what and how to do (avoid duplicated tasks) based on memory and action history.
-Your response should be a brief paragraph (<50 words, prefixed with "Thought:") describing what you plan to do, followed by Python code that executes the plan.
+Your response should be a brief paragraph (<50 words, prefixed with "Thought:") describing what you plan to do, followed by Python code wrapped in ``` block that executes the plan.
 
 Note:
 - Do not include comments in the code.

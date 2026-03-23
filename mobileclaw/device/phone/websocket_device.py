@@ -1065,14 +1065,33 @@ Note: Be conservative - only return a match if you're confident the user meant t
 
             if not is_ascii:
                 try:
-                    # 通过设备端服务设置剪贴板
-                    self.set_clipboard(text_str)
-                    # 发送粘贴键（KEYCODE_PASTE = 279）
-                    subprocess.run(
-                        f"adb -s {self.device_serial_id} shell input keyevent 279",
-                        shell=True,
-                        check=True
-                    )
+                    lines = text_str.split('\n')
+
+                    for idx, line in enumerate(lines):
+                        if line:
+                            self.set_clipboard(line)
+                            try:
+                                clipboard_text = self.get_clipboard()
+                                if clipboard_text != line:
+                                    logger.debug(
+                                        f"剪贴板校验不一致，expected={repr(line)}, actual={repr(clipboard_text)}"
+                                    )
+                            except Exception as verify_err:
+                                logger.debug(f"剪贴板校验失败: {verify_err}")
+
+                            subprocess.run(
+                                ["adb", "-s", self.device_serial_id, "shell", "input", "keyevent", "279"],
+                                check=True
+                            )
+                            time.sleep(0.15)
+
+                        if idx < len(lines) - 1:
+                            subprocess.run(
+                                ["adb", "-s", self.device_serial_id, "shell", "input", "keyevent", "66"],
+                                check=True
+                            )
+                            time.sleep(0.1)
+
                     logger.debug("使用剪贴板+粘贴键方式成功输入非 ASCII 文本")
                     return True
                 except Exception as e_clip:
@@ -1092,16 +1111,14 @@ Note: Be conservative - only return a match if you're confident the user meant t
                     escaped_text = line_for_adb.replace('"', '\\"').replace("'", "\\'")
 
                     subprocess.run(
-                        f'adb -s {self.device_serial_id} shell input text "{escaped_text}"',
-                        shell=True,
+                        ["adb", "-s", self.device_serial_id, "shell", "input", "text", escaped_text],
                         check=True
                     )
 
                 # 如果不是最后一行，说明原始文本中存在换行符，补一个 Enter
                 if idx < len(lines) - 1:
                     subprocess.run(
-                        f"adb -s {self.device_serial_id} shell input keyevent 66",
-                        shell=True,
+                        ["adb", "-s", self.device_serial_id, "shell", "input", "keyevent", "66"],
                         check=True
                     )
 

@@ -10,6 +10,8 @@ custom_fm_name: ?
 custom_gui_vlm_url: ?
 custom_gui_vlm_key: ?
 custom_gui_vlm_name: ?
+gui_coordinate_scale_mode: auto
+gui_max_screenshot_width: 1200
 
 root_dir: (path to root dir)
 name: (name of your bot)
