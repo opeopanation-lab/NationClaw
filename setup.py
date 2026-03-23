@@ -7,13 +7,13 @@ setup(
     name='mobileclaw',
     packages=find_packages(include=['mobileclaw']),
     # this must be the same as the name above
-    version='0.0.1a1',
+    version='0.3.1',
     description='Development framework and runtime system for mobile agents.',
     author='MobileClaw Team',
     license='CUSTOM',
     author_email='li.yuanchun@foxmail.com',
     url='https://github.com/MobileClaw/MobileClaw',  # use the URL to the github repo
-    download_url='https://github.com/MobileClaw/MobileClaw/tarball/0.0.1a1',
+    download_url='https://github.com/MobileClaw/MobileClaw/tarball/0.3.1',
     keywords=['AI', 'agent', 'mobile', 'framework', 'LLM'],  # arbitrary keywords
     classifiers=[
         # How mature is this project? Common values are
