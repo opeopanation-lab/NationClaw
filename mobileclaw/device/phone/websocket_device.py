@@ -1216,7 +1216,9 @@ Note: Be conservative - only return a match if you're confident the user meant t
             raise Exception('command failed')
         res = json.loads(res)
         if res['status'] != 'success':
-            raise Exception(res)
+            if res.get('clipboard_fallback'):
+                raise Exception("Input failed. Text saved into clipboard. Try to paste it instead.")
+            raise Exception(res.get('message', 'command failed'))
         return res
 
     def take_screenshot_adb(self):
