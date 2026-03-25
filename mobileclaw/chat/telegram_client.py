@@ -375,6 +375,12 @@ class Telegram_Client(Chat_Client):
             sender_id,
         )
 
+        self._set_org_manager_if_missing(
+            'org_manager_user_id',
+            'chat_telegram_org_manager',
+            sender_id,
+        )
+
         # Build content from text and/or media
         content_parts = []
         media_paths = []

@@ -143,6 +143,12 @@ class Slack_Client(Chat_Client):
         # Store channel_id for replies
         self._channel_ids[sender_id] = chat_id
 
+        self._set_org_manager_if_missing(
+            'org_manager_user_id',
+            'chat_slack_org_manager',
+            sender_id,
+        )
+
         # Strip bot mention from text
         if self._bot_user_id:
             text = re.sub(rf"<@{re.escape(self._bot_user_id)}>\s*", "", text).strip()

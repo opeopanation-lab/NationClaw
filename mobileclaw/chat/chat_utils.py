@@ -1,8 +1,12 @@
 """
 The interfaces to chat with users or other agents.
 """
+import structlog
+
 from mobileclaw.utils.interface import UniInterface
 from mobileclaw.utils import debug
+
+logger = structlog.get_logger(__name__)
 
 
 class Chat_Message:
@@ -29,5 +33,23 @@ class Chat_Client(UniInterface):
     def __init__(self, agent):
         super().__init__(agent)
         self._tag = 'chat.client'
-        pass
 
+    def _set_org_manager_if_missing(self, local_attr_name, config_attr_name, sender):
+        """Bind the first valid sender as org_manager when it is not configured."""
+        if not sender:
+            return
+
+        current_org_manager = getattr(self, local_attr_name, None)
+        if current_org_manager:
+            return
+
+        setattr(self, local_attr_name, sender)
+        if hasattr(self.agent, "config"):
+            setattr(self.agent.config, config_attr_name, sender)
+
+        logger.info(
+            "org_manager auto-bound from first valid message",
+            channel=self._tag,
+            org_manager=sender,
+            config_key=config_attr_name,
+        )

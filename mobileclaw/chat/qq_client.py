@@ -137,6 +137,12 @@ class QQ_Client(Chat_Client):
             if not content:
                 return
 
+            self._set_org_manager_if_missing(
+                'org_manager_user_id',
+                'chat_qq_org_manager',
+                user_id,
+            )
+
             # Handle commands (only from org_manager)
             if content.startswith('/') and user_id == self.org_manager_user_id:
                 await self._handle_command(content.strip(), user_id, data.id)
