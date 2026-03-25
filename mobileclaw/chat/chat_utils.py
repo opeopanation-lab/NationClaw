@@ -1,8 +1,12 @@
 """
 The interfaces to chat with users or other agents.
 """
+import structlog
+
 from mobileclaw.utils.interface import UniInterface
 from mobileclaw.utils import debug
+
+logger = structlog.get_logger(__name__)
 
 
 class Chat_Message:
@@ -72,3 +76,4 @@ class Chat_Client(UniInterface):
         if not self._manager_only_enabled():
             return None
         return manager_id
+

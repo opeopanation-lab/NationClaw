@@ -377,6 +377,12 @@ class Telegram_Client(Chat_Client):
         if not self._should_handle_incoming(sender_id, self.org_manager_user_id, logger=logger, channel='telegram'):
             return
 
+        self._set_org_manager_if_missing(
+            'org_manager_user_id',
+            'chat_telegram_org_manager',
+            sender_id,
+        )
+
         # Build content from text and/or media
         content_parts = []
         media_paths = []

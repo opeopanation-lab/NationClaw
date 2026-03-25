@@ -188,6 +188,12 @@ class Discord_Client(Chat_Client):
         # Store channel_id for replies
         self._channel_ids[sender_id] = channel_id
 
+        self._set_org_manager_if_missing(
+            'org_manager_user_id',
+            'chat_discord_org_manager',
+            sender_id,
+        )
+
         # Build content from text and attachments
         content_parts = [content] if content else []
         media_paths = []

@@ -118,6 +118,12 @@ class WhatsApp_Client(Chat_Client):
             # Store full jid for replies
             self._chat_ids[sender_id] = sender
 
+            self._set_org_manager_if_missing(
+                'org_manager_user_id',
+                'chat_whatsapp_org_manager',
+                sender_id,
+            )
+
             # Handle commands
             if content.startswith('/') and sender_id == self.org_manager_user_id:
                 await self._handle_command(content.strip(), sender)

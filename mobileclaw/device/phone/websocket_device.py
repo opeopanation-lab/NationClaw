@@ -973,7 +973,7 @@ Note: Be conservative - only return a match if you're confident the user meant t
 
             component_name = ""
             if adb_result.returncode == 0 and adb_result.stdout:
-                # 解析输出，格式通常类似于：topResumedActivity=ActivityRecord{40c5d47 u0 com.wisewk.assistant/com.example.ruyiclient.MainActivity t378}
+                # 解析输出，格式通常类似于：topResumedActivity=ActivityRecord{40c5d47 u0 com.example.assistant/com.example.assistant.MainActivity t378}
                 match = re.search(r'topResumedActivity=ActivityRecord\{[^}]+\s+u0\s+([^}\s]+)', adb_result.stdout)
                 if match:
                     component_name = match.group(1).strip()
