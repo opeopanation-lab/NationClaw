@@ -62,6 +62,12 @@ class Chat_Interface(UniInterface):
             self.slack_client._open()
             self.chat_clients['slack'] = self.slack_client
 
+        if 'weixin' in self.chat_channels:
+            from .weixin_client import Weixin_Client
+            self.weixin_client = Weixin_Client(self.agent)
+            self.weixin_client._open()
+            self.chat_clients['weixin'] = self.weixin_client
+
     def _close(self):
         for client in self.chat_clients.values():
             if client is not None:

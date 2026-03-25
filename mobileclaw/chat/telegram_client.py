@@ -374,6 +374,8 @@ class Telegram_Client(Chat_Client):
             'chat_telegram_org_manager',
             sender_id,
         )
+        if not self._should_handle_incoming(sender_id, self.org_manager_user_id, logger=logger, channel='telegram'):
+            return
 
         # Build content from text and/or media
         content_parts = []
@@ -474,6 +476,9 @@ class Telegram_Client(Chat_Client):
         if not self._app:
             logger.warning('Telegram client not initialized')
             return
+        manager_receiver = self._manager_receiver(self.org_manager_user_id)
+        if manager_receiver is not None:
+            receiver = manager_receiver
 
         if receiver is None:
             # Use report_receiver if set, otherwise default to org_manager
@@ -563,6 +568,9 @@ class Telegram_Client(Chat_Client):
         Send a message to the log receiver.
         If log_receiver is not set, returns without sending.
         """
+        if self._manager_only_enabled() and self.org_manager_user_id:
+            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
+            return
         if self.log_receiver is None:
             logger.debug('No log receiver set, skipping send_to_log')
             return

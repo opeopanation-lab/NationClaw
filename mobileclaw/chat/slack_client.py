@@ -165,6 +165,8 @@ class Slack_Client(Chat_Client):
         if text.startswith('/') and sender_id == self.org_manager_user_id:
             await self._handle_command(text.strip(), chat_id, thread_ts)
             return
+        if not self._should_handle_incoming(sender_id, self.org_manager_user_id, logger=logger, channel='slack'):
+            return
 
         # Call agent's message handler
         if hasattr(self.agent, 'handle_message'):
@@ -225,6 +227,9 @@ class Slack_Client(Chat_Client):
         if not self._web_client or not self._loop:
             logger.warning('Slack client not initialized')
             return
+        manager_receiver = self._manager_receiver(self.org_manager_user_id)
+        if manager_receiver is not None:
+            receiver = manager_receiver
 
         if receiver is None:
             if self.report_receiver:
@@ -269,6 +274,9 @@ class Slack_Client(Chat_Client):
 
     def send_to_log(self, message, subject="Log"):
         """Send a message to the log receiver."""
+        if self._manager_only_enabled() and self.org_manager_user_id:
+            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
+            return
         if self.log_receiver is None:
             return
         try:

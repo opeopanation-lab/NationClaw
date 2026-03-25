@@ -72,7 +72,7 @@ custom_fm_name: "gpt-5.2-chat"
 
 ## 聊天应用配置
 
-MobileClaw 支持 `telegram`、`lark`、`qq`、`zulip`、`discord`、`whatsapp` 和 `slack`。你可以在 `config.yaml` 中通过逗号分隔的 `chat_channels` 同时启用多个平台：
+MobileClaw 支持 `telegram`、`lark`、`qq`、`zulip`、`discord`、`whatsapp`、`slack` 和 `weixin`。你可以在 `config.yaml` 中通过逗号分隔的 `chat_channels` 同时启用多个平台：
 
 ```yaml
 chat_channels: zulip,lark
@@ -91,9 +91,30 @@ default_chat_channel: zulip
 ```yaml
 chat_channels: telegram
 chat_telegram_token: YOUR_BOT_TOKEN
-chat_telegram_org_manager: YOUR_USER_ID  # 你的 Telegram 用户 ID
-chat_telegram_proxy: http://proxy:port  # 可选，如果需要代理
+chat_telegram_org_manager: YOUR_USER_ID  # 可选；留空则将第一个发消息的人视为org_manager
+chat_telegram_proxy: http://proxy:port  # 可选；如果需要代理
 ```
+</details>
+
+<details>
+<summary>Weixin</summary>
+
+**1. 准备 iLink bot API**
+- 确保你的微信机器人账号可以访问 iLink HTTP API
+- 如果已经拿到 bot token，可直接填写配置
+- 如果还没有 token，MobileClaw 启动后可以自动走扫码登录流程
+
+**2. 在 `config.yaml` 中配置**
+```yaml
+chat_channels: weixin
+chat_weixin_base_url: YOUR_BOT_BASE_URL  # 可选；留空则走扫码登录
+chat_weixin_bot_token: YOUR_BOT_TOKEN  # 可选；留空则走扫码登录
+```
+
+**3. 说明**
+- 当前实现支持文本消息接收与回复
+- 如果未填写 `chat_weixin_bot_token`，程序启动时会通过日志输出QR Code URL（字段为qrcode_url=xxx），扫码即可绑定
+- 用户首次给 bot 发消息后，会建立后续回复所需的会话上下文
 </details>
 
 <details>
@@ -119,7 +140,7 @@ chat_telegram_proxy: http://proxy:port  # 可选，如果需要代理
 chat_channels: lark
 chat_lark_app_id: cli_xxx
 chat_lark_app_secret: xxx
-chat_lark_org_manager: ou_xxx  # 你的飞书 open_id 或手机号
+chat_lark_org_manager: ou_xxx  # 可选，你的飞书 open_id 或手机号，留空则将第一个发消息的人视为org_manager
 ```
 </details>
 

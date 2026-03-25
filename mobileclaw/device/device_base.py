@@ -569,11 +569,11 @@ class DeviceControllerBase(UniInterface):
         return (self.width, self.height)
 
     def _prepare_screenshot_for_model(self, screenshot: Image.Image) -> tuple[Image.Image, float, float]:
-        max_size = getattr(self.agent.config, 'gui_max_screenshot_width', 1200) or 1200
+        max_size = self.agent.config.gui_max_screenshot_width
         original_width, original_height = screenshot.size
         longest_side = max(original_width, original_height)
 
-        if longest_side <= max_size:
+        if max_size is not None and longest_side <= max_size:
             return screenshot, 1.0, 1.0
 
         resize_ratio = max_size / longest_side

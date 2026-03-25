@@ -285,6 +285,8 @@ class Lark_Client(Chat_Client):
             history_content = "\n".join([f'[{m[2]}] {m[0]}: {m[1]}' for m in history_messages])
 
             # Handle the message
+            if not self._should_handle_incoming(sender_id, self.org_manager_open_id, logger=logger, channel='lark'):
+                return
             if hasattr(self.agent, 'handle_message'):
                 self.agent.handle_message(
                     message=content,
@@ -479,6 +481,9 @@ class Lark_Client(Chat_Client):
             subject: Subject/topic for group messages (optional)
         """
         try:
+            manager_receiver = self._manager_receiver(self.org_manager_open_id)
+            if manager_receiver is not None:
+                receiver = manager_receiver
             if receiver is None:
                 # Use report_receiver if set, otherwise default to org_manager
                 if self.report_receiver:
@@ -724,6 +729,9 @@ class Lark_Client(Chat_Client):
             message: Message content to send
             subject: Subject/topic for the message (optional)
         """
+        if self._manager_only_enabled() and self.org_manager_open_id:
+            self.send_message(message, receiver=self.org_manager_open_id, subject=subject)
+            return
         if self.log_receiver is None:
             logger.debug('No log receiver set, skipping send_to_log')
             return

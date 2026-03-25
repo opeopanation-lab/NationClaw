@@ -122,6 +122,8 @@ class WhatsApp_Client(Chat_Client):
             if content.startswith('/') and sender_id == self.org_manager_user_id:
                 await self._handle_command(content.strip(), sender)
                 return
+            if not self._should_handle_incoming(sender_id, self.org_manager_user_id, logger=logger, channel='whatsapp'):
+                return
 
             # Call agent's message handler
             if hasattr(self.agent, 'handle_message'):
@@ -187,6 +189,9 @@ class WhatsApp_Client(Chat_Client):
         if not self._ws or not self._connected:
             logger.warning('WhatsApp client not connected')
             return
+        manager_receiver = self._manager_receiver(self.org_manager_user_id)
+        if manager_receiver is not None:
+            receiver = manager_receiver
 
         if receiver is None:
             if self.report_receiver:
@@ -231,6 +236,9 @@ class WhatsApp_Client(Chat_Client):
 
     def send_to_log(self, message, subject="Log"):
         """Send a message to the log receiver."""
+        if self._manager_only_enabled() and self.org_manager_user_id:
+            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
+            return
         if self.log_receiver is None:
             return
         try:

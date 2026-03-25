@@ -10,8 +10,6 @@ custom_fm_name: ?
 custom_gui_vlm_url: ?
 custom_gui_vlm_key: ?
 custom_gui_vlm_name: ?
-gui_coordinate_scale_mode: auto
-gui_max_screenshot_width: 1200
 
 root_dir: (path to root dir)
 name: (name of your bot)
@@ -21,6 +19,7 @@ log_level: 20   # Info
 
 chat_channels: zulip,lark
 default_chat_channel: zulip
+chat_with_manager_only: false
 chat_zulip_email: ? (zulip bot config)
 chat_zulip_key: ?
 chat_zulip_site: ?
@@ -41,3 +40,6 @@ chat_whatsapp_org_manager: ? (org manager's whatsapp sender id)
 chat_slack_bot_token: ? (slack bot token, xoxb-...)
 chat_slack_app_token: ? (slack app token, xapp-...)
 chat_slack_org_manager: ? (org manager's slack user id)
+chat_weixin_base_url: https://ilinkai.weixin.qq.com
+chat_weixin_bot_token: ? (optional weixin ilink bot token; omit to use QR login)
+chat_weixin_org_manager: ? (org manager's weixin user id)

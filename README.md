@@ -72,7 +72,7 @@ custom_fm_name: "gpt-5.2-chat"
 
 ## Chat App Configuration
 
-MobileClaw supports `telegram`, `lark`, `qq`, `zulip`, `discord`, `whatsapp`, and `slack`. Configure one or more platforms in `config.yaml` with a comma-separated `chat_channels` value:
+MobileClaw supports `telegram`, `lark`, `qq`, `zulip`, `discord`, `whatsapp`, `slack`, and `weixin`. Configure one or more platforms in `config.yaml` with a comma-separated `chat_channels` value:
 
 ```yaml
 chat_channels: zulip,lark
@@ -91,9 +91,30 @@ default_chat_channel: zulip
 ```yaml
 chat_channels: telegram
 chat_telegram_token: YOUR_BOT_TOKEN
-chat_telegram_org_manager: YOUR_USER_ID  # Your Telegram user ID
-chat_telegram_proxy: http://proxy:port  # Optional, if you need a proxy
+chat_telegram_org_manager: YOUR_USER_ID  # Optional; if omitted, the first sender becomes org_manager
+chat_telegram_proxy: http://proxy:port  # Optional; if you need a proxy
 ```
+</details>
+
+<details>
+<summary>Weixin</summary>
+
+**1. Prepare the iLink bot API**
+- Make sure your Weixin bot account can access the iLink HTTP API
+- If you already have a bot token, configure it directly
+- If not, MobileClaw can start a QR login flow and wait for confirmation
+
+**2. Configure in `config.yaml`**
+```yaml
+chat_channels: weixin
+chat_weixin_base_url: YOUR_BOT_BASE_URL  # Optional; omit to use QR login
+chat_weixin_bot_token: YOUR_BOT_TOKEN  # Optional; omit to use QR login
+```
+
+**3. Notes**
+- Current implementation supports text message receive/reply
+- If `chat_weixin_bot_token` is omitted, startup logs will print a QR Code URL (`qrcode_url=...`) for login
+- The first incoming message from a user establishes the reply context for later responses
 </details>
 
 <details>
@@ -119,7 +140,7 @@ chat_telegram_proxy: http://proxy:port  # Optional, if you need a proxy
 chat_channels: lark
 chat_lark_app_id: cli_xxx
 chat_lark_app_secret: xxx
-chat_lark_org_manager: ou_xxx  # Your Lark open_id or phone number
+chat_lark_org_manager: ou_xxx  # Optional; your Lark open_id or phone number. If omitted, the first sender becomes org_manager
 ```
 </details>
 
@@ -212,7 +233,7 @@ chat_slack_org_manager: U01234567  # Your Slack user ID
 ```
 </details>
 
-We recommend `zulip` or `Lark/Feishu` since they support rich group features. `discord`, `whatsapp`, and `slack` are also available but were not sufficiently tested.
+We have tested `zulip`, `Lark/Feishu`, `telegram` and `wechat` and they work well. Other channels are also available but are not well tested.
 
 ## Acknowledgments
 

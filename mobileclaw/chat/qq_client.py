@@ -141,6 +141,8 @@ class QQ_Client(Chat_Client):
             if content.startswith('/') and user_id == self.org_manager_user_id:
                 await self._handle_command(content.strip(), user_id, data.id)
                 return
+            if not self._should_handle_incoming(user_id, self.org_manager_user_id, logger=logger, channel='qq'):
+                return
 
             # Store chat_id for replies
             self._chat_id_mapping[user_id] = user_id
@@ -241,6 +243,9 @@ class QQ_Client(Chat_Client):
         if not self._client:
             logger.warning('QQ client not initialized')
             return
+        manager_receiver = self._manager_receiver(self.org_manager_user_id)
+        if manager_receiver is not None:
+            receiver = manager_receiver
 
         if receiver is None:
             # Use report_receiver if set, otherwise default to org_manager
@@ -303,6 +308,9 @@ class QQ_Client(Chat_Client):
         Send a message to the log receiver.
         If log_receiver is not set, returns without sending.
         """
+        if self._manager_only_enabled() and self.org_manager_user_id:
+            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
+            return
         if self.log_receiver is None:
             logger.debug('No log receiver set, skipping send_to_log')
             return

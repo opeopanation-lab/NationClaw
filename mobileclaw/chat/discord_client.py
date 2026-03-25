@@ -220,6 +220,8 @@ class Discord_Client(Chat_Client):
         if final_content.startswith('/') and sender_id == self.org_manager_user_id:
             await self._handle_command(final_content.strip(), channel_id)
             return
+        if not self._should_handle_incoming(sender_id, self.org_manager_user_id, logger=logger, channel='discord'):
+            return
 
         # Call agent's message handler
         if hasattr(self.agent, 'handle_message'):
@@ -274,6 +276,9 @@ class Discord_Client(Chat_Client):
         if not self._http or not self._loop:
             logger.warning('Discord client not initialized')
             return
+        manager_receiver = self._manager_receiver(self.org_manager_user_id)
+        if manager_receiver is not None:
+            receiver = manager_receiver
 
         if receiver is None:
             if self.report_receiver:
@@ -318,6 +323,9 @@ class Discord_Client(Chat_Client):
 
     def send_to_log(self, message, subject="Log"):
         """Send a message to the log receiver."""
+        if self._manager_only_enabled() and self.org_manager_user_id:
+            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
+            return
         if self.log_receiver is None:
             return
         if not self._http or not self._loop:

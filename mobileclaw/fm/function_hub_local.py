@@ -968,6 +968,7 @@ Note:
 
         # Build API documentation based on mode
         # Exclude device and task decomposition APIs in handle_message and conclude_task modes
+        no_gui_mode = getattr(self.agent.config, 'no_gui_mode', False)
         api_docs = """
 - Messaging
   - `agent.send_message(message, receiver=None, channel=None)`: send a message to the `receiver` via `channel`. `message` can be a string, an image/file (represented as file path). `receiver` is the name/id. `receiver=None, channel=None` means sending to the manager. This API is used for sending messages through internal channels.
@@ -993,7 +994,7 @@ Note:
 - Task control
   - `agent.end_task(status)`: End the current task. `status` must be 'finished', 'failed', or 'infeasible'."""
 
-        if mode in ['normal']:
+        if mode in ['normal'] and not no_gui_mode:
             api_docs = """
 - Device use
   - `agent.get_device_screen(device)`: get the current screen of a device. The screenshot will be included in the next step's context. Make sure to call this first when starting a device-use session.
@@ -1017,7 +1018,7 @@ If the task does not clearly specify what to do. Try generating a specific task 
 
 ## System Jobs
 
-- If there is any missing information (marked with "?") in the profile, ask the manager to complete them.
+- If there is any missing information (marked with "?") in the profile, ask the manager (老板) to complete them.
 - Analyze pending tasks in memory and complete them if it is an appropriate time. The user-requested pending tasks have higher priority than routine system/profile jobs.
 - Every day before other tasks, summarize yesterday's memory and save important information into long-term memory.
 - Compress the long-term memory or the daily memory by summarizing and deduplicating if it is too long (e.g. >1000 words).
@@ -1040,6 +1041,12 @@ The following skills provide domain-specific knowledge and procedures. Read the 
 {skills_text}
 """
 
+        if no_gui_mode:
+            prompt += """
+## No-GUI Mode
+Device operation is disabled in this run. Do not plan to use any GUI or device-control actions.
+"""
+
         prompt += f"""
 # The Current Task
 
@@ -1057,7 +1064,7 @@ The following skills provide domain-specific knowledge and procedures. Read the 
 ## Your Response
 
 You need to decide the next action to take toward completing the task. You need to understand what and how to do (avoid duplicated tasks) based on memory and action history.
-Your response should be a brief paragraph (<50 words, prefixed with "Thought:") describing what you plan to do, followed by Python code wrapped in ``` block that executes the plan.
+Your response should be a brief paragraph (<50 words, prefixed with "Thought:", using the same language as user responses) describing what you plan to do, followed by Python code wrapped in ``` block that executes the plan.
 
 Note:
 - Do not include comments in the code.

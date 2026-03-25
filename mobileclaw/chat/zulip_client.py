@@ -132,6 +132,8 @@ class Zulip_Client(Chat_Client):
         # Handle the message with "group:" prefix for sender
         history_messages = self.get_history_messages(msg)
         history_content = "\n".join([f'[{m[2]}] {m[0]}: {m[1]}' for m in history_messages])
+        if not self._should_handle_incoming(sender_email, self.org_manager_email, logger=logger, channel='zulip'):
+            return
         self.agent.handle_message(content, history=history_content, sender=sender_name_new, channel='zulip')
 
     def _handle_command(self, command: str, msg):
@@ -210,6 +212,9 @@ class Zulip_Client(Chat_Client):
             subject: Subject/topic for stream messages (optional for private messages)
         """
         try:
+            manager_receiver = self._manager_receiver(self.org_manager_email)
+            if manager_receiver is not None:
+                receiver = manager_receiver
             if receiver is None:
                 # Use report_receiver if set, otherwise default to org_manager
                 if self.report_receiver:
@@ -450,6 +455,9 @@ class Zulip_Client(Chat_Client):
             message: Message content to send
             subject: Subject/topic for the message (default: "Log")
         """
+        if self._manager_only_enabled() and self.org_manager_email:
+            self.send_message(message, receiver=self.org_manager_email, subject=subject)
+            return
         if self.log_receiver is None:
             # Default behavior: send to agent's self-reporting stream
             stream_name = f'{self.agent.name}'

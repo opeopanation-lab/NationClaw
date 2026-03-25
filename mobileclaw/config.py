@@ -38,11 +38,12 @@ class AgentConfig:
     device_mappings: Dict[str, str] = field(default_factory=dict, metadata={"help": "Mapping of device names to serial IDs, e.g. {'device1': 'serial1', 'device2': 'serial2'}."})
     phone_port_mappings: Dict[str, int] = field(default_factory=dict, metadata={"help": "Mapping of phone device names to port numbers, e.g. {'phone1': 51825, 'phone2': 51826}."})
     prefer_phone_action_type: str = field(default='websocket', metadata={"help": "Prefer phone input type."})
+    no_gui_mode: bool = field(default=False, metadata={"help": "Disable GUI/device actions and run only local sandbox tasks."})
 
     use_wisewk_service: bool = field(default=False, metadata={"help": "Whether to use Wisewk"})
-    wisewk_fm_name: str = field(default='ruyifm', metadata={"help": "Model name of the foundation model."})
-    wisewk_gui_vlm_name: str = field(default='ruyigui', metadata={"help": "Model name of the GUI VLM."})
-    wisewk_url: Optional[str] = field(default=None, metadata={"help": "API URL for Wisewk."})
+    wisewk_fm_name: str = field(default='wisewk_fm', metadata={"help": "Model name of the foundation model."})
+    wisewk_gui_vlm_name: str = field(default='wisewk_gui', metadata={"help": "Model name of the GUI VLM."})
+    wisewk_url: Optional[str] = field(default='https://api.wisewk.com/v1/chat/completions', metadata={"help": "API URL for Wisewk."})
     wisewk_key: Optional[str] = field(default=None, metadata={"help": "API key for Wisewk."})
 
     use_custom_fm: bool = field(default=True, metadata={"help": "Whether to use Custom Foundation Model."})
@@ -55,13 +56,14 @@ class AgentConfig:
     custom_gui_vlm_key: Optional[str] = field(default=None, metadata={"help": "API key for Custom GUI Model."})
     custom_gui_vlm_name: Optional[str] = field(default=None, metadata={"help": "Model name for Custom GUI Model."})
     gui_coordinate_scale_mode: Literal['auto', 'always', 'never'] = field(default='auto', metadata={"help": "Whether to scale GUI model-returned coordinates."})
-    gui_max_screenshot_width: int = field(default=1200, metadata={"help": "Maximum width/height of screenshots sent to GUI models. Larger screenshots will be resized so the longer side is at most this value."})
+    gui_max_screenshot_width: int = field(default=2000, metadata={"help": "Maximum width/height of screenshots sent to GUI models. Larger screenshots will be resized so the longer side is at most this value."})
 
     log_level: Optional[int] = field(default=logging.DEBUG, metadata={"help": "Logging level"})
 
     chat_max_previous_messages: int = field(default=100, metadata={"help": "Max previous chat messages."})
     chat_channels: str = field(default='none', metadata={"help": "Chat backends."})
     default_chat_channel: str = field(default='zulip', metadata={"help": "Default chat channel to use when no channel is specified."})
+    chat_with_manager_only: bool = field(default=False, metadata={"help": "If True, only handle messages from the org manager and only send messages to the org manager."})
     chat_zulip_email: Optional[str] = field(default=None, metadata={"help": "Zulip email for chat."})
     chat_zulip_key: Optional[str] = field(default=None, metadata={"help": "Zulip key for chat."})
     chat_zulip_site: Optional[str] = field(default=None, metadata={"help": "Zulip site for chat."})
@@ -88,6 +90,10 @@ class AgentConfig:
     chat_slack_bot_token: Optional[str] = field(default=None, metadata={"help": "Slack bot token (xoxb-...) for chat."})
     chat_slack_app_token: Optional[str] = field(default=None, metadata={"help": "Slack app-level token (xapp-...) for Socket Mode."})
     chat_slack_org_manager: Optional[str] = field(default=None, metadata={"help": "Slack user_id of the org owner."})
+
+    chat_weixin_base_url: Optional[str] = field(default='https://ilinkai.weixin.qq.com', metadata={"help": "Base URL for the Weixin iLink bot API."})
+    chat_weixin_bot_token: Optional[str] = field(default=None, metadata={"help": "Weixin iLink bot token for chat. If omitted, QR login will be used."})
+    chat_weixin_org_manager: Optional[str] = field(default=None, metadata={"help": "Weixin user_id of the org owner."})
 
     save_query_for_debug: bool = field(default=False, metadata={"help": "Whether to save model query prompts and responses for debugging."})
     run_with_ide: bool = field(default=False, metadata={"help": "Whether to run as a submodule of IDE."})
