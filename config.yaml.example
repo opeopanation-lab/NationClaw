@@ -4,42 +4,52 @@ mode: development
 phone_port_mappings: {}
 prefer_phone_action_type: adb
 
+use_custom_fm: true
 custom_fm_url: ?
 custom_fm_key: ?
 custom_fm_name: ?
+
+use_custom_gui_vlm: true
 custom_gui_vlm_url: ?
 custom_gui_vlm_key: ?
 custom_gui_vlm_name: ?
 
 root_dir: (path to root dir)
 name: (name of your bot)
-task_language: en
 save_query_for_debug: false
 log_level: 20   # Info
 
 chat_channels: zulip,lark
 default_chat_channel: zulip
 chat_with_manager_only: false
+
 chat_zulip_email: ? (zulip bot config)
 chat_zulip_key: ?
 chat_zulip_site: ?
 chat_zulip_org_manager: ? (org manager's zulip email)
+
 chat_lark_app_id: ? (lark/feishu app id)
 chat_lark_app_secret: ?
 chat_lark_org_manager: ? (org manager's lark open_id or phone)
+
 chat_qq_app_id: ? (qq bot app id)
 chat_qq_secret: ?
 chat_qq_org_manager: ? (org manager's qq user openid)
+
 chat_telegram_token: ? (telegram bot token)
 chat_telegram_org_manager: ? (org manager's telegram user id)
 chat_telegram_proxy: ? (optional telegram proxy url)
+
 chat_discord_token: ? (discord bot token)
 chat_discord_org_manager: ? (org manager's discord user id)
+
 chat_whatsapp_bridge_url: ws://localhost:18790
 chat_whatsapp_org_manager: ? (org manager's whatsapp sender id)
+
 chat_slack_bot_token: ? (slack bot token, xoxb-...)
 chat_slack_app_token: ? (slack app token, xapp-...)
 chat_slack_org_manager: ? (org manager's slack user id)
+
 chat_weixin_base_url: https://ilinkai.weixin.qq.com
 chat_weixin_bot_token: ? (optional weixin ilink bot token; omit to use QR login)
 chat_weixin_org_manager: ? (org manager's weixin user id)
