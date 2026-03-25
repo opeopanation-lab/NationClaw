@@ -77,3 +77,23 @@ class Chat_Client(UniInterface):
             return None
         return manager_id
 
+    def _set_org_manager_if_missing(self, local_attr_name, config_attr_name, sender):
+        """Bind the first valid sender as org_manager when it is not configured."""
+        if not sender:
+            return
+
+        current_org_manager = getattr(self, local_attr_name, None)
+        if current_org_manager:
+            return
+
+        setattr(self, local_attr_name, sender)
+        if hasattr(self.agent, "config"):
+            setattr(self.agent.config, config_attr_name, sender)
+
+        logger.info(
+            "org_manager auto-bound from first valid message",
+            channel=self._tag,
+            org_manager=sender,
+            config_key=config_attr_name,
+        )
+
