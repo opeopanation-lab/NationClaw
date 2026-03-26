@@ -1,6 +1,14 @@
 # MobileClaw - Fully Autonomous Mobile Agent
 
-[[中文文档](README_zh.md)] | [English]
+<div align="center">
+
+[![中文文档](https://img.shields.io/badge/中文文档-README__zh.md-0f766e?style=flat-square)](README_zh.md)
+![English](https://img.shields.io/badge/English-Current-2563eb?style=flat-square)
+[![Website](https://img.shields.io/badge/Website-mobileclaw.github.io-7c3aed?style=flat-square)](https://mobileclaw.github.io/)
+[![Android App](https://img.shields.io/badge/Android%20App-Download-16a34a?style=flat-square)](https://github.com/MobileClaw/MobileClaw/releases/latest/download/MobileClaw.apk)
+[![News](https://img.shields.io/badge/News-Latest-f59e0b?style=flat-square)](#news)
+
+</div>
 
 <div align="center">
   <img src="_res/brand.png" alt="mobileclaw" width="600">
@@ -10,26 +18,49 @@
   <img src="_res/mobileclaw_demo_5x.gif" alt="mobileclaw_demo" width="100%">
 </div>
 
-----
+<div align="center">
 
-MobileClaw's mission is to enable openclaw-style agents on mobile devices (e.g. your secondary phone).
+### Open, human-like mobile automation for everyone
 
-Unlike existing coding agents based on low-level system commands, third-party APIs and MCP services, MobileClaw executes tasks mostly through GUI like human, which means higher usability and reliability for everyone (including non-experts) in daily use.
+</div>
 
-**Features**:
-- Natively built for mobile devices (e.g. Android).
-- Human-like interaction with apps via vision/GUI.
-- Lightweight design with minimal third-party service integration.
-- Memory organized as .md files.
-- Communication with users via daily messaging apps.
+---
 
-**Important Notice:** 
-- To avoid security risks, please **DO NOT** use MobileClaw to control your main device.
-- We strongly suggest using **seperated app accounts** on MobileClaw-controlled devices and **DO NOT** spam the Internet.
+MobileClaw's mission is to enable openclaw-style agents on mobile devices (e.g. your spare Android phone).
 
-## How to Install
+Unlike existing coding agents based on low-level system commands, third-party APIs and/or MCP services, MobileClaw executes tasks mostly through GUI like human, which means higher usability and reliability for everyone (including non-experts) in daily use.
 
-1. Clone this project.
+## Highlights
+
+- 📱 Natively built for mobile devices (e.g. Android).
+- 👀 Human-like interaction with apps via vision/GUI.
+- 🪶 Lightweight design with minimal third-party service integration.
+- 📝 Memory and skills organized as `.md` files, like other *claw*s.
+- 💬 Communication with users via daily messaging apps (Telegram, Weixin, etc.).
+
+> [!IMPORTANT]
+> - To avoid security risks, please **DO NOT** use MobileClaw to control your main device.
+> - We strongly suggest using **seperated app accounts** on MobileClaw-controlled devices and **DO NOT** spam the Internet.
+
+## News
+
+- 🚀 2026.03.27 MobileClaw app v0.3.3 released.
+- ✨ 2026.03.26 Added support for Weixin chat channel.
+- 🌱 2026.02.08 Project kick-off.
+
+## Getting Started
+
+### For users
+
+- Download and install the [MobileClaw Android app](https://github.com/MobileClaw/MobileClaw/releases/latest/download/MobileClaw.apk).
+- Complete the model/chat configurations.
+- Click the start button and enjoy.
+
+Visit our [project website](https://mobileclaw.github.io) for details.
+
+### For developers
+
+1. Clone this project into your development environment.
 2. Run `cd MobileClaw` and `pip install -e .`
 
 ## How to Use
@@ -41,20 +72,18 @@ Unlike existing coding agents based on low-level system commands, third-party AP
 3. Start your agent with `mobileclaw config.yaml`.
 4. Send messages to the agent or modify its `profile.md` to customize.
 
-
 ## Android Device Set Up
 
 1. Connect your Android device via ADB. Enable developer mode. ([How to enable developer mode?](https://www.android.com/intl/en_uk/articles/enable-android-developer-settings/))
 2. Run `adb install mobileclaw/resources/apk/MobileClaw.apk` to install the Client App to your phone.
 3. Grant **Accessibility Service permission** and **Notification permission**; the WebSocket service will start automatically on the Android device.
 4. In `config.yaml`, set the port for PC-side forwarding. Configure separate ports for each device in `phone_port_mappings`, like this:
-    ```yaml
-    phone_port_mappings:
-        phone1: 51825
-        phone2: 51826
-    ```
+   ```yaml
+   phone_port_mappings:
+       phone1: 51825
+       phone2: 51826
+   ```
 5. On your computer, run `adb forward tcp:<device_port> tcp:6666` to forward the Android WebSocket service to your PC. `<device_port>` is the port you set in the config.
-
 
 ## Model Configuration
 
@@ -72,6 +101,21 @@ custom_fm_name: "gpt-5.2-chat"
 
 ## Chat App Configuration
 
+<div align="center">
+
+| Platform | Status |
+| --- | --- |
+| `telegram` | Supported |
+| `lark` | Supported |
+| `qq` | Supported |
+| `zulip` | Supported |
+| `discord` | Supported |
+| `whatsapp` | Supported |
+| `slack` | Supported |
+| `weixin` | Supported |
+
+</div>
+
 MobileClaw supports `telegram`, `lark`, `qq`, `zulip`, `discord`, `whatsapp`, `slack`, and `weixin`. Configure one or more platforms in `config.yaml` with a comma-separated `chat_channels` value:
 
 ```yaml
@@ -80,7 +124,7 @@ default_chat_channel: zulip
 ```
 
 <details>
-<summary>Telegram</summary>
+<summary><strong>Telegram</strong></summary>
 
 **1. Create a bot**
 - Open Telegram, search `@BotFather`
@@ -97,7 +141,7 @@ chat_telegram_proxy: http://proxy:port  # Optional; if you need a proxy
 </details>
 
 <details>
-<summary>Weixin</summary>
+<summary><strong>Weixin</strong></summary>
 
 **1. Prepare the iLink bot API**
 - Make sure your Weixin bot account can access the iLink HTTP API
@@ -118,7 +162,7 @@ chat_weixin_bot_token: YOUR_BOT_TOKEN  # Optional; omit to use QR login
 </details>
 
 <details>
-<summary>Lark/Feishu</summary>
+<summary><strong>Lark/Feishu</strong></summary>
 
 **1. Create a Lark bot**
 - Visit [Feishu Open Platform](https://open.feishu.cn/app)
@@ -145,7 +189,7 @@ chat_lark_org_manager: ou_xxx  # Optional; your Lark open_id or phone number. If
 </details>
 
 <details>
-<summary>QQ</summary>
+<summary><strong>QQ</strong></summary>
 
 **1. Create a QQ bot**
 - Visit [QQ Open Platform](https://q.qq.com)
@@ -162,7 +206,7 @@ chat_qq_org_manager: YOUR_USER_OPENID  # Your QQ user openid
 </details>
 
 <details>
-<summary>Zulip</summary>
+<summary><strong>Zulip</strong></summary>
 
 **1. Create a Zulip bot**
 - Go to your Zulip organization settings
@@ -181,7 +225,7 @@ chat_zulip_org_manager: manager@example.com  # Org manager's zulip email. Defaul
 </details>
 
 <details>
-<summary>Discord</summary>
+<summary><strong>Discord</strong></summary>
 
 **1. Create a Discord bot**
 - Visit the [Discord Developer Portal](https://discord.com/developers/applications)
@@ -199,7 +243,7 @@ chat_discord_org_manager: YOUR_USER_ID  # Your Discord user ID
 </details>
 
 <details>
-<summary>WhatsApp</summary>
+<summary><strong>WhatsApp</strong></summary>
 
 **1. Start the WhatsApp bridge**
 - MobileClaw's WhatsApp client connects to a local Node.js WebSocket bridge
@@ -215,7 +259,7 @@ chat_whatsapp_org_manager: YOUR_PHONE_OR_SENDER_ID  # Usually phone number witho
 </details>
 
 <details>
-<summary>Slack</summary>
+<summary><strong>Slack</strong></summary>
 
 **1. Create a Slack app**
 - Visit [Slack API Apps](https://api.slack.com/apps)
