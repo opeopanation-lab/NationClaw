@@ -259,17 +259,16 @@ class Weixin_Client(Chat_Client):
         org_manager_set = self._set_org_manager_if_missing(from_user_id)
         if org_manager_set:
             self.send_message(self._org_manager_status_text(), receiver=from_user_id)
-        if not self._should_handle_incoming(from_user_id, self.org_manager_user_id, logger=logger, channel='weixin'):
-            return
-        if self._ensure_report_receiver_global('weixin', receiver_key):
-            self.send_message(self._receiver_status_text('report', True), receiver=receiver_key)
-
         group_id = message.get('group_id')
         receiver_key = f'group:{group_id}' if group_id else from_user_id
         content = self._extract_message_content(message)
         if not content:
             logger.debug('Skipping unsupported Weixin message without text content')
             return
+        if not self._should_handle_incoming(from_user_id, self.org_manager_user_id, logger=logger, channel='weixin'):
+            return
+        if not self._is_command_message(content) and self._ensure_report_receiver_global('weixin', receiver_key):
+            self.send_message(self._receiver_status_text('report', True), receiver=receiver_key)
 
         self._remember_route(receiver_key, message)
         history_messages = self.get_history_messages(receiver_key)
@@ -445,7 +444,7 @@ class Weixin_Client(Chat_Client):
         self.org_manager_user_id = sender_id
         if hasattr(self.agent.config, 'chat_weixin_org_manager'):
             self.agent.config.chat_weixin_org_manager = sender_id
-        logger.info(f'Weixin org manager initialized to {sender_id}')
+        logger.info(f'Weixin manager initialized to {sender_id}')
         return True
 
     def _remember_route(self, receiver_key, message):

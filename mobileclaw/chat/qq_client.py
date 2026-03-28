@@ -152,7 +152,7 @@ class QQ_Client(Chat_Client):
                 return
             if not self._should_handle_incoming(user_id, self.org_manager_user_id, logger=logger, channel='qq'):
                 return
-            if self._ensure_report_receiver_global('qq', user_id):
+            if not self._is_command_message(content) and self._ensure_report_receiver_global('qq', user_id):
                 await self._async_send_message(self._receiver_status_text('report', True), user_id)
 
             # Store chat_id for replies

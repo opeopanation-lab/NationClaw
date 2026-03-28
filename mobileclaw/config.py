@@ -63,7 +63,7 @@ class AgentConfig:
     chat_max_previous_messages: int = field(default=100, metadata={"help": "Max previous chat messages."})
     chat_channels: str = field(default='none', metadata={"help": "Chat backends."})
     default_chat_channel: str = field(default='zulip', metadata={"help": "Default chat channel to use when no channel is specified."})
-    chat_with_manager_only: bool = field(default=False, metadata={"help": "If True, only handle messages from the org manager and only send messages to the org manager."})
+    chat_with_manager_only: bool = field(default=False, metadata={"help": "If True, only handle messages from the manager and only send messages to the manager."})
     chat_zulip_email: Optional[str] = field(default=None, metadata={"help": "Zulip email for chat."})
     chat_zulip_key: Optional[str] = field(default=None, metadata={"help": "Zulip key for chat."})
     chat_zulip_site: Optional[str] = field(default=None, metadata={"help": "Zulip site for chat."})

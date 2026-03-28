@@ -185,7 +185,7 @@ class Zulip_Client(Chat_Client):
         history_content = "\n".join([f'[{m[2]}] {m[0]}: {m[1]}' for m in history_messages])
         if not self._should_handle_incoming(sender_email, self.org_manager_email, logger=logger, channel='zulip'):
             return
-        if self._ensure_report_receiver_global('zulip', sender_name_new):
+        if not self._is_command_message(content) and self._ensure_report_receiver_global('zulip', sender_name_new):
             self.send_reply(self._receiver_status_text('report', True), msg)
         self.agent.handle_message(content, history=history_content, sender=sender_name_new, channel='zulip')
 

@@ -175,7 +175,7 @@ chat_channels: zulip
 chat_zulip_email: bot@example.zulipchat.com
 chat_zulip_key: YOUR_API_KEY
 chat_zulip_site: YOUR_ZULIP_ORG_URL
-chat_zulip_org_manager: manager@example.com  # Org manager's zulip email. Default format: user{6-digit-zulip-id}@{org-name}.zulipchat.com
+chat_zulip_org_manager: manager@example.com  # manager's zulip email. Default format: user{6-digit-zulip-id}@{org-name}.zulipchat.com
 ```
 
 </details>

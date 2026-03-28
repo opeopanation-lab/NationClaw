@@ -133,7 +133,7 @@ class Lark_Client(Chat_Client):
                 mobiles = [org_manager.replace('-', '').replace(' ', '')]
             else:
                 # Assume it's already an open_id
-                logger.debug(f'Org manager appears to be an open_id: {org_manager}')
+                logger.debug(f'manager appears to be an open_id: {org_manager}')
                 return
 
             # Build request to convert email/phone to open_id
@@ -338,7 +338,7 @@ class Lark_Client(Chat_Client):
             # Handle the message
             if not self._should_handle_incoming(sender_id, self.org_manager_open_id, logger=logger, channel='lark'):
                 return
-            if self._ensure_report_receiver_global('lark', sender_name):
+            if not self._is_command_message(content) and self._ensure_report_receiver_global('lark', sender_name):
                 await self._send_text_reply(self._receiver_status_text('report', True), message_id)
             if hasattr(self.agent, 'handle_message'):
                 self.agent.handle_message(

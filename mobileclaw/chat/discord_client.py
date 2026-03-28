@@ -231,7 +231,7 @@ class Discord_Client(Chat_Client):
             return
         if not self._should_handle_incoming(sender_id, self.org_manager_user_id, logger=logger, channel='discord'):
             return
-        if self._ensure_report_receiver_global('discord', channel_id):
+        if not self._is_command_message(final_content) and self._ensure_report_receiver_global('discord', channel_id):
             await self._send_to_channel(self._receiver_status_text('report', True), channel_id)
 
         # Call agent's message handler

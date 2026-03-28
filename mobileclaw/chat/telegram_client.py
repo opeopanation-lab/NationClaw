@@ -114,7 +114,7 @@ class Telegram_Client(Chat_Client):
         self.report_receiver = None  # Set via /report_here command
 
     def _set_org_manager_if_missing(self, attr_name, config_name, sender_id):
-        """Persist the first Telegram sender as org manager when not configured."""
+        """Persist the first Telegram sender as manager when not configured."""
         current_value = getattr(self, attr_name, None)
         if current_value not in (None, "", "?"):
             return False
@@ -123,7 +123,7 @@ class Telegram_Client(Chat_Client):
         if hasattr(self.agent.config, config_name):
             setattr(self.agent.config, config_name, sender_id)
 
-        logger.info(f"Telegram org manager initialized to {sender_id}")
+        logger.info(f"Telegram manager initialized to {sender_id}")
         return True
 
     def _remember_chat_id(self, sender_id, chat_id):
@@ -369,7 +369,7 @@ class Telegram_Client(Chat_Client):
             await message.reply_text(self._org_manager_status_text())
         if not self._should_handle_incoming(sender_id, self.org_manager_user_id, logger=logger, channel='telegram'):
             return
-        if self._ensure_report_receiver_global('telegram', sender_id):
+        if not self._is_command_message(message.text) and self._ensure_report_receiver_global('telegram', sender_id):
             await message.reply_text(self._receiver_status_text('report', True))
 
         # Build content from text and/or media

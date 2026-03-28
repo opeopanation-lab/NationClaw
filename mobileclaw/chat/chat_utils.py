@@ -79,6 +79,12 @@ class Chat_Client(UniInterface):
             return None
         return manager_id
 
+    @staticmethod
+    def _is_command_message(content):
+        if content is None:
+            return False
+        return str(content).lstrip().startswith('/')
+
     def _resolve_local_attachment_path(self, file_path):
         if not file_path:
             return None, None
@@ -182,7 +188,7 @@ class Chat_Client(UniInterface):
 
     @staticmethod
     def _org_manager_status_text():
-        return "✅ Org manager set to you. You can use /log_here or /report_here to manage delivery."
+        return "✅ Manager set to you."
 
     def _set_log_receiver_global(self, channel, receiver):
         self.agent.chat.set_log_receiver(channel, receiver)
