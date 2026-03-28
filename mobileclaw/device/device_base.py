@@ -127,7 +127,7 @@ class DeviceControllerBase(UniInterface):
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = f"device_step_{step}_{timestamp}.png"
                 filepath = os.path.join(screenshots_dir, filename)
-                screenshot.save(filepath, format='PNG')
+                model_screenshot.save(filepath, format='PNG')
                 screen_path = os.path.relpath(filepath, self.agent.file.agent_dir)
             except Exception as e:
                 logger.warning(f"Failed to save screenshot to file: {e}")
@@ -206,8 +206,9 @@ class DeviceControllerBase(UniInterface):
         # Take a final screenshot and add to results
         try:
             final_screenshot = self.take_screenshot()
+            final_model_screenshot, _, _ = self._prepare_screenshot_for_model(final_screenshot)
             img_byte_arr = BytesIO()
-            final_screenshot.save(img_byte_arr, format='PNG')
+            final_model_screenshot.save(img_byte_arr, format='PNG')
             final_base64 = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
             img_byte_arr.close()
 
@@ -215,7 +216,7 @@ class DeviceControllerBase(UniInterface):
             os.makedirs(screenshots_dir, exist_ok=True)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filepath = os.path.join(screenshots_dir, f"device_final_{timestamp}.png")
-            final_screenshot.save(filepath, format='PNG')
+            final_model_screenshot.save(filepath, format='PNG')
             final_path = os.path.relpath(filepath, self.agent.file.agent_dir)
 
             screenshots.append((final_path, final_base64))
@@ -585,12 +586,20 @@ class DeviceControllerBase(UniInterface):
         )
         return resized, resized_width / original_width, resized_height / original_height
 
-    def _is_scaled_coordinate_model(self) -> bool:
-        mode = getattr(self.agent.config, 'gui_coordinate_scale_mode', 'auto')
-        if mode == 'always':
-            return True
+    def _get_coordinate_mode(self) -> str:
+        mode = str(getattr(self.agent.config, 'gui_coordinate_scale_mode', 'auto') or 'auto').strip().lower()
         if mode == 'never':
-            return False
+            return 'image_pixels'
+        if mode == 'always':
+            return 'scale_1000'
+        if mode.startswith('scale_'):
+            scale_value = mode[len('scale_'):]
+            try:
+                parsed_value = float(scale_value)
+                if parsed_value > 0:
+                    return f'scale_{parsed_value}'
+            except ValueError:
+                logger.warning(f"Invalid gui_coordinate_scale_mode: {mode}, fallback to auto")
 
         gui_vlm_name = ''
         if getattr(self.agent.config, 'use_custom_gui_vlm', False):
@@ -599,9 +608,13 @@ class DeviceControllerBase(UniInterface):
             gui_vlm_name = getattr(self.agent.config, 'wisewk_gui_vlm_name', '') or ''
 
         gui_vlm_name = gui_vlm_name.lower()
-        return 'seed' in gui_vlm_name
+        if gui_vlm_name.startswith('kimi'):
+            return 'scale_1'
+        if 'seed' in gui_vlm_name:
+            return 'scale_1000'
+        return 'image_pixels'
 
-    def _scale_coordinates_if_needed(self, x: int, y: int) -> tuple:
+    def _scale_coordinates_if_needed(self, x: int | float, y: int | float) -> tuple:
         """
         Restore model coordinates to actual device dimensions.
 
@@ -618,15 +631,15 @@ class DeviceControllerBase(UniInterface):
             logger.error(f"Invalid device dimensions (width={device_width}, height={device_height}), using original coordinates")
             return (0, 0)
 
-        if self._is_scaled_coordinate_model():
-            model_width = 1000
-            model_height = 1000
-            scale_x = device_width / model_width
-            scale_y = device_height / model_height
-            scaled_x = int(x * scale_x)
-            scaled_y = int(y * scale_y)
+        coordinate_mode = self._get_coordinate_mode()
+
+        if coordinate_mode.startswith('scale_'):
+            scale_range = float(coordinate_mode[len('scale_'):])
+            scaled_x = int(float(x) / scale_range * device_width)
+            scaled_y = int(float(y) / scale_range * device_height)
             logger.debug(
-                f"Seed coordinate scaling: ({x}, {y}) -> ({scaled_x}, {scaled_y}) (device: {device_width}x{device_height})"
+                f"Scaled coordinates ({scale_range} range): ({x}, {y}) -> ({scaled_x}, {scaled_y}) "
+                f"(device: {device_width}x{device_height})"
             )
         else:
             input_scale_x = getattr(self, '_last_model_input_scale_x', 1.0) or 1.0

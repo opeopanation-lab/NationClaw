@@ -263,8 +263,7 @@ class AutoAgent:
         agent_info = f"""
 - Current Time: {current_time}
 - Agent Name: {self.name}
-- Agent Permission: {self.permission}
-- Agent Profile ({profile_path_rel}):
+- Profile Defined By Manager ({profile_path_rel}):
 ```
 {profile_content}
 ```
@@ -813,9 +812,9 @@ Task: {current_task}
         if getattr(self.config, 'use_wisewk_service', False):
             logger.info("✅ Using Wisewk service")
         if getattr(self.config, 'use_custom_fm', False):
-            logger.info("✅ Using custom FM model")
+            logger.info(f"✅ Using custom FM model: {self.config.custom_fm_name}")
         if getattr(self.config, 'use_custom_gui_vlm', False):
-            logger.info("✅ Using custom GUI-VLM model")
+            logger.info(f"✅ Using custom GUI-VLM model: {self.config.custom_gui_vlm_name}")
 
     def get_current_task_line(self):
         """Get the current line number being executed in the task."""

@@ -129,6 +129,8 @@ class Chat_Interface(UniInterface):
         # Use log_channel if set and no explicit channel specified
         if channel is None and self.log_channel is not None:
             channel = self.log_channel
+        if channel is None:
+            return
         client = self._get_client(channel)
         if client is not None and hasattr(client, 'send_to_log'):
             client.send_to_log(message, subject)

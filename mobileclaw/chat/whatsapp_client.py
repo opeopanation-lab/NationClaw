@@ -2,6 +2,7 @@
 The WhatsApp chat client implementation using Node.js bridge (via @whiskeysockets/baileys).
 """
 import asyncio
+import base64
 import json
 from threading import Thread
 import structlog
@@ -110,7 +111,11 @@ class WhatsApp_Client(Chat_Client):
             pn = data.get("pn", "")
             # New LID style
             sender = data.get("sender", "")
-            content = data.get("content", "")
+            content = data.get("content", "") or ""
+            media_type = data.get("media_type")
+            file_name = data.get("file_name") or "attachment"
+            file_data = data.get("file_data")
+            file_path = data.get("file_path")
 
             user_id = pn if pn else sender
             sender_id = user_id.split("@")[0] if "@" in user_id else user_id
@@ -123,6 +128,29 @@ class WhatsApp_Client(Chat_Client):
                 'chat_whatsapp_org_manager',
                 sender_id,
             )
+
+            content_parts = [content] if content else []
+            if media_type:
+                saved_path = None
+                try:
+                    if file_data:
+                        saved_path = self._save_incoming_media_bytes(
+                            'whatsapp',
+                            file_name,
+                            base64.b64decode(file_data),
+                        )
+                    elif file_path:
+                        with open(file_path, 'rb') as file_obj:
+                            saved_path = self._save_incoming_media_bytes(
+                                'whatsapp',
+                                file_name,
+                                file_obj.read(),
+                            )
+                except Exception as e:
+                    logger.warning(f"Failed to persist WhatsApp media: {e}")
+                if saved_path:
+                    content_parts.append(self._format_incoming_attachment_ref(media_type, saved_path))
+            content = "\n".join([part for part in content_parts if part]).strip()
 
             # Handle commands
             if content.startswith('/') and sender_id == self.org_manager_user_id:
@@ -190,6 +218,27 @@ class WhatsApp_Client(Chat_Client):
         except Exception as e:
             logger.error(f"Error sending WhatsApp message: {e}")
 
+    async def _async_send_media(self, item, chat_id):
+        """Send media through the WhatsApp bridge."""
+        if not self._ws or not self._connected:
+            logger.warning("WhatsApp bridge not connected")
+            return
+        try:
+            with open(item['abs_path'], 'rb') as file_obj:
+                file_data = base64.b64encode(file_obj.read()).decode('utf-8')
+            payload = {
+                "type": "send_media",
+                "to": chat_id,
+                "media_type": item['message_type'],
+                "file_name": item['name'],
+                "mime_type": item['mime_type'],
+                "file_path": item['abs_path'],
+                "file_data": file_data,
+            }
+            await self._ws.send(json.dumps(payload))
+        except Exception as e:
+            logger.error(f"Error sending WhatsApp media: {e}")
+
     def send_message(self, message, receiver=None, subject=None):
         """Send a message to a user."""
         if not self._ws or not self._connected:
@@ -215,15 +264,25 @@ class WhatsApp_Client(Chat_Client):
             return
 
         try:
+            normalized_message = self._normalize_outgoing_message(message)
             if self._loop and self._loop.is_running():
-                asyncio.run_coroutine_threadsafe(
-                    self._async_send(str(message), chat_id),
-                    self._loop
-                ).result(timeout=10)
+                for item in normalized_message:
+                    coro = (
+                        self._async_send(item['text'], chat_id)
+                        if item['kind'] == 'text'
+                        else self._async_send_media(item, chat_id)
+                    )
+                    asyncio.run_coroutine_threadsafe(coro, self._loop).result(timeout=10)
             else:
                 loop = asyncio.new_event_loop()
                 try:
-                    loop.run_until_complete(self._async_send(str(message), chat_id))
+                    for item in normalized_message:
+                        coro = (
+                            self._async_send(item['text'], chat_id)
+                            if item['kind'] == 'text'
+                            else self._async_send_media(item, chat_id)
+                        )
+                        loop.run_until_complete(coro)
                 finally:
                     loop.close()
         except Exception as e:

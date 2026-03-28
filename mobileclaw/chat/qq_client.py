@@ -2,6 +2,7 @@
 The QQ chat client implementation.
 """
 import asyncio
+import base64
 from collections import deque
 from threading import Thread
 import structlog
@@ -266,20 +267,49 @@ class QQ_Client(Chat_Client):
 
         try:
             # Run async operation in thread-safe way
+            normalized_message = self._normalize_outgoing_message(message)
             if self._loop and self._loop.is_running():
-                asyncio.run_coroutine_threadsafe(
-                    self._async_send_message(message, receiver),
-                    self._loop
-                ).result(timeout=10)
+                for item in normalized_message:
+                    coro = (
+                        self._async_send_message(item['text'], receiver)
+                        if item['kind'] == 'text'
+                        else self._async_send_attachment(item, receiver)
+                    )
+                    asyncio.run_coroutine_threadsafe(coro, self._loop).result(timeout=10)
             else:
                 # Fallback: create new event loop
                 loop = asyncio.new_event_loop()
                 try:
-                    loop.run_until_complete(self._async_send_message(message, receiver))
+                    for item in normalized_message:
+                        coro = (
+                            self._async_send_message(item['text'], receiver)
+                            if item['kind'] == 'text'
+                            else self._async_send_attachment(item, receiver)
+                        )
+                        loop.run_until_complete(coro)
                 finally:
                     loop.close()
         except Exception as e:
             logger.exception(f'Error sending QQ message: {e}')
+
+    async def _async_send_attachment(self, item, receiver):
+        """Async helper to send attachment."""
+        try:
+            if hasattr(self._client.api, 'post_c2c_base64file'):
+                file_type = 1 if item['message_type'] == 'image' else 4
+                with open(item['abs_path'], 'rb') as file_obj:
+                    encoded = base64.b64encode(file_obj.read()).decode('utf-8')
+                await self._client.api.post_c2c_base64file(
+                    openid=receiver,
+                    file_type=file_type,
+                    file_data=encoded,
+                    srv_send_msg=True,
+                )
+            else:
+                await self._async_send_message(f"[{item['message_type']}: {item['rel_path']}]", receiver)
+        except Exception as e:
+            logger.error(f'Error in async attachment send: {e}')
+            raise
 
     async def _async_send_message(self, message, receiver):
         """Async helper to send message."""

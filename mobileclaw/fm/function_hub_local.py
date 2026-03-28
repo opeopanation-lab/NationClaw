@@ -416,10 +416,32 @@ next_operations = [
                 if isinstance(item, str):
                     text_parts.append(item)
                 elif isinstance(item, tuple) and len(item) == 2:
-                    # Image tuple (path, base64)
-                    media_path, media_base64 = item
-                    medias.append(item)
-                    # Add citation to text
+                    first, second = item
+
+                    # New-style attachment tuple: ('image', 'relative/or/abs/path')
+                    if str(first).lower() in ('image', 'img'):
+                        media_path = str(second)
+                        abs_path = media_path
+                        if not os.path.isabs(abs_path):
+                            abs_path = os.path.join(self.agent.file.agent_dir, media_path)
+
+                        if os.path.exists(abs_path):
+                            try:
+                                with open(abs_path, 'rb') as media_file:
+                                    media_base64 = base64.b64encode(media_file.read()).decode('utf-8')
+                                medias.append((media_path, media_base64))
+                                text_parts.append(f"[Image: {media_path}]")
+                            except Exception as e:
+                                logger.warning(f"Failed to read image file {media_path}: {e}")
+                                text_parts.append(f"[Image: {media_path} - read failed]")
+                        else:
+                            logger.warning(f"Image file not found for model query: {media_path}")
+                            text_parts.append(f"[Image: {media_path} - not found]")
+                        continue
+
+                    # Old-style tuple: (path, base64)
+                    media_path, media_base64 = first, second
+                    medias.append((media_path, media_base64))
                     if media_path:
                         text_parts.append(f"[Image: {media_path}]")
                     else:
@@ -950,10 +972,10 @@ Note:
         if mode == 'handle_message':
             mode_instruction = f"""
 ## IMPORTANT: You are in "Handle Message" Mode. The purpose of this mode is to handle incoming messages by:
-1. Reading relevant memory and knowledge files to understand context
+1. Reading relevant memory, knowledge files, or device screen/trajectory to get necessary information.
 2. Updating memory and profile files with new conversation information.
-3. This mode is not supposed for lengthy tasks using `do_with_device` or `execute_task`. If there is anything remaining to do with device, add it to the daily memory with "[PENDING]" prefix. The sender/channel information should be recorded for reporting progress/results when completing the pending task.
-4. Generating appropriate responses and sending them using `agent.send_message` API. Make sure your response's `receiver` param exactly equals to the message's `sender`, using the same channel (zulip, lark, telegram, etc.).
+3. This mode is not supposed for lengthy tasks using `do_with_device` or `execute_task`. If there is anything remaining to do with device, add it to the daily memory with "[PENDING]" prefix. Record this message's sender/channel names for reporting task progress/results later via send_message.
+4. Generating appropriate responses and sending them using `agent.send_message` API. Make sure your response's `receiver` param exactly equals to the message's `sender`, using the same channel (zulip, lark, telegram, weixin, etc.).
 
 """
         elif mode == 'conclude_task':
@@ -969,9 +991,16 @@ Note:
         # Build API documentation based on mode
         # Exclude device and task decomposition APIs in handle_message and conclude_task modes
         no_gui_mode = getattr(self.agent.config, 'no_gui_mode', False)
+        channel_names = self.agent.config.chat_channels
         api_docs = """
 - Messaging
-  - `agent.send_message(message, receiver=None, channel=None)`: send a message to the `receiver` via `channel`. `message` can be a string, an image/file (represented as file path). `receiver` is the name/id. `receiver=None, channel=None` means sending to the manager. This API is used for sending messages through internal channels.
+  - `agent.send_message(message, receiver=None, channel=None)`: send a message to the `receiver` via `channel`. `message` can be:
+    - a string
+    - a list mixing strings and attachment tuples
+    - an attachment tuple of the form `('image', 'relative/path/to/file.png')` or `('file', 'relative/path/to/file.pdf')`
+    Attachment file paths must be relative to `agent_dir`. `receiver` is the name/id. `receiver=None, channel=None` means sending to the manager.
+    Note: This API is used for sending messages through internal channels. Don't reply messages received from handle_message via do_with_device.
+    Note: If you need to send images or files through chat, use `agent.send_message` with a list. Each list item can be plain text or a tuple like `('image', 'relative/path/to/file.png')` or `('file', 'relative/path/to/file.pdf')`.
 
 - AI model calling
   - `agent.query_model(params, model_name=None)`: query the foundation model. `params` is a list of query parameters (text, image, etc.). `model_name` specifies the preferred model to use in this query. The available models can be found in `Available Models` section.
@@ -991,15 +1020,17 @@ Note:
 - Note-taking
   - `agent.take_note(text)`: Record a text note about task progress. Use this for useful information that helps with future steps.
 
+- Device info retrieval
+  - `agent.get_device_screen(device)`: get the current screen of a device. The screenshot will be included in the next step's context. Make sure to call this first when starting a device-use session.
+  - `agent.infer_from_last_trajectory(question)`: Summarize information from the last `do_with_device` trajectory (actions, thoughts, and screens). `question` is what you want to know from the trajectory. Must be called after `do_with_device`.
+
 - Task control
   - `agent.end_task(status)`: End the current task. `status` must be 'finished', 'failed', or 'infeasible'."""
 
         if mode in ['normal'] and not no_gui_mode:
             api_docs = """
 - Device use
-  - `agent.get_device_screen(device)`: get the current screen of a device. The screenshot will be included in the next step's context. Make sure to call this first when starting a device-use session.
   - `agent.do_with_device(task, device)`: Execute a subtask on a device (phone/browser/...) based on the current screen. `task` is a natural language description of what to do based on current screen (should be a simple task with less than 5 interactions). `device` is the name/id of an available device. The available devices can be found in `Available Devices` section.
-  - `agent.infer_from_last_trajectory(question)`: Summarize information from the last `do_with_device` trajectory (actions, thoughts, and screens). `question` is what you want to know from the trajectory. Must be called after `do_with_device`.
 
 - Task decomposition
   - `agent.execute_task(task)`: Execute a subtask (for breaking down complex tasks into smaller ones).

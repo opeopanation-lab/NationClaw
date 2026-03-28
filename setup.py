@@ -44,6 +44,7 @@ setup(
         "markitdown",
         'pyyaml',
         "Pillow",
+        "cryptography",
         'zulip',
         'lark_oapi',
         'qq-botpy>=1.2.0',

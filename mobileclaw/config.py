@@ -55,7 +55,7 @@ class AgentConfig:
     custom_gui_vlm_url: Optional[str] = field(default=None, metadata={"help": "API URL for Custom GUI Model."})
     custom_gui_vlm_key: Optional[str] = field(default=None, metadata={"help": "API key for Custom GUI Model."})
     custom_gui_vlm_name: Optional[str] = field(default=None, metadata={"help": "Model name for Custom GUI Model."})
-    gui_coordinate_scale_mode: Literal['auto', 'always', 'never'] = field(default='auto', metadata={"help": "Whether to scale GUI model-returned coordinates."})
+    gui_coordinate_scale_mode: str = field(default='auto', metadata={"help": "How to restore GUI model-returned coordinates. Supports 'auto', 'never', or 'scale_xxx' where xxx is the model coordinate range (e.g. scale_1000, scale_1)."})
     gui_max_screenshot_width: int = field(default=2000, metadata={"help": "Maximum width/height of screenshots sent to GUI models. Larger screenshots will be resized so the longer side is at most this value."})
 
     log_level: Optional[int] = field(default=logging.DEBUG, metadata={"help": "Logging level"})

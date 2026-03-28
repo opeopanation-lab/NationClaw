@@ -6,6 +6,7 @@ import io
 import random
 import requests
 import base64
+import os
 from threading import Thread
 import structlog
 
@@ -40,6 +41,33 @@ class Zulip_Client(Chat_Client):
         self.log_receiver = None  # Set via /log_here command
         # Report receiver for send_message when receiver is None
         self.report_receiver = None  # Set via /report_here command
+
+    def _replace_and_download_incoming_attachments(self, content):
+        """Download Zulip uploaded attachments and replace links with local temp paths."""
+        if not content:
+            return content
+
+        link_pattern = re.compile(r'\[([^\]]*)\]\((/user_uploads/[^)]+)\)')
+
+        def replace_match(match):
+            link_text = match.group(1) or ""
+            relative_url = match.group(2)
+            filename = os.path.basename(relative_url.split('?', 1)[0]) or 'attachment'
+            full_url = f'{self.server_url.rstrip("/")}{relative_url}'
+
+            try:
+                response = self.client.session.get(full_url, timeout=30)
+                response.raise_for_status()
+                local_path = self._save_incoming_media_bytes('zulip', filename, response.content)
+            except Exception as e:
+                logger.warning(f'Failed to download Zulip attachment: {e}')
+                return match.group(0)
+
+            rel_path = os.path.relpath(local_path, self.agent.file.agent_dir)
+            link_label = link_text or filename
+            return f'[{link_label}]({rel_path})'
+
+        return link_pattern.sub(replace_match, content)
 
     def _open(self):
         if not ZULIP_AVAILABLE:
@@ -97,7 +125,7 @@ class Zulip_Client(Chat_Client):
             return
 
         msg = event['message']
-        content = msg['content'].strip()
+        content = self._replace_and_download_incoming_attachments(msg['content'].strip())
 
         if msg['sender_email'] in [self.zulip_email, 'notification-bot@zulip.com']:
             # Ignoring message sent by myself and notification bot
@@ -236,6 +264,25 @@ class Zulip_Client(Chat_Client):
                 )
                 return None
 
+            normalized_message = self._normalize_outgoing_message(message)
+            text_parts = []
+            for item in normalized_message:
+                if item['kind'] == 'text':
+                    text_parts.append(item['text'])
+                    continue
+
+                with open(item['abs_path'], 'rb') as file_obj:
+                    upload_result = self.client.upload_file(file_obj)
+                if upload_result.get('result') != 'success':
+                    raise Exception(f'upload_file failed: {upload_result}')
+                upload_uri = upload_result['uri']
+                if item['message_type'] == 'image':
+                    text_parts.append(f'[]({upload_uri})')
+                else:
+                    text_parts.append(f'[{os.path.basename(item["name"])}]({upload_uri})')
+
+            outgoing_content = "\n".join([part for part in text_parts if part])
+
             # Check if receiver has "group:" prefix
             if receiver.startswith("group:"):
                 # Stream message - remove the prefix
@@ -244,7 +291,7 @@ class Zulip_Client(Chat_Client):
                     'type': 'stream',
                     'to': stream_name,
                     'subject': subject if subject else 'General',
-                    'content': message,
+                    'content': outgoing_content,
                 }
             else:
                 # Private message to user
@@ -253,7 +300,7 @@ class Zulip_Client(Chat_Client):
                 msg = {
                     'type': 'private',
                     'to': receiver_email,
-                    'content': message,
+                    'content': outgoing_content,
                 }
             result = self.client.send_message(msg)
             if result.get('result') != 'success':

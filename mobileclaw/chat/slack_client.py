@@ -2,9 +2,11 @@
 The Slack chat client implementation using Socket Mode.
 """
 import asyncio
+from pathlib import Path
 import re
 from threading import Thread
 import structlog
+import requests
 
 from .chat_utils import Chat_Client
 
@@ -132,6 +134,34 @@ class Slack_Client(Chat_Client):
             return
 
         text = event.get("text") or ""
+        content_parts = [text] if text else []
+
+        for file_info in event.get("files") or []:
+            file_url = file_info.get("url_private_download") or file_info.get("url_private")
+            if not file_url:
+                continue
+            filename = file_info.get("name") or "attachment"
+            try:
+                response = requests.get(
+                    file_url,
+                    headers={"Authorization": f"Bearer {self.agent.config.chat_slack_bot_token}"},
+                    timeout=30,
+                )
+                response.raise_for_status()
+                file_path = self._save_incoming_media_bytes(
+                    'slack',
+                    filename.replace("/", "_"),
+                    response.content,
+                )
+                if (file_info.get("mimetype") or "").startswith("image/"):
+                    content_parts.append(self._format_incoming_attachment_ref('image', file_path))
+                else:
+                    content_parts.append(self._format_incoming_attachment_ref('file', file_path))
+            except Exception as e:
+                logger.warning(f"Failed to download Slack attachment: {e}")
+                content_parts.append(f"[attachment: {filename} - download failed]")
+
+        text = "\n".join([part for part in content_parts if part]).strip()
 
         # Avoid double-processing: prefer app_mention over message with mention
         if event_type == "message" and self._bot_user_id and f"<@{self._bot_user_id}>" in text:
@@ -228,6 +258,18 @@ class Slack_Client(Chat_Client):
         except Exception as e:
             logger.error(f"Error sending Slack message: {e}")
 
+    async def _async_send_attachment(self, item, channel_id):
+        """Send an attachment to Slack."""
+        if not self._web_client:
+            return
+        with open(item['abs_path'], 'rb') as file_obj:
+            await self._web_client.files_upload_v2(
+                channel=channel_id,
+                file=file_obj,
+                filename=item['name'],
+                title=item['name'],
+            )
+
     def send_message(self, message, receiver=None, subject=None):
         """Send a message to a user or channel."""
         if not self._web_client or not self._loop:
@@ -253,15 +295,25 @@ class Slack_Client(Chat_Client):
             return
 
         try:
+            normalized_message = self._normalize_outgoing_message(message)
             if self._loop.is_running():
-                asyncio.run_coroutine_threadsafe(
-                    self._async_send(str(message), channel_id),
-                    self._loop
-                ).result(timeout=10)
+                for item in normalized_message:
+                    coro = (
+                        self._async_send(item['text'], channel_id)
+                        if item['kind'] == 'text'
+                        else self._async_send_attachment(item, channel_id)
+                    )
+                    asyncio.run_coroutine_threadsafe(coro, self._loop).result(timeout=10)
             else:
                 loop = asyncio.new_event_loop()
                 try:
-                    loop.run_until_complete(self._async_send(str(message), channel_id))
+                    for item in normalized_message:
+                        coro = (
+                            self._async_send(item['text'], channel_id)
+                            if item['kind'] == 'text'
+                            else self._async_send_attachment(item, channel_id)
+                        )
+                        loop.run_until_complete(coro)
                 finally:
                     loop.close()
         except Exception as e:

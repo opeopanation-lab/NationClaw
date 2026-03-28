@@ -208,14 +208,15 @@ class Discord_Client(Chat_Client):
                 content_parts.append(f"[attachment: {filename} - too large]")
                 continue
             try:
-                media_dir = Path.home() / ".mobileclaw" / "media"
-                media_dir.mkdir(parents=True, exist_ok=True)
-                file_path = media_dir / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
                 resp = await self._http.get(url)
                 resp.raise_for_status()
-                file_path.write_bytes(resp.content)
+                file_path = self._save_incoming_media_bytes(
+                    'discord',
+                    f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}",
+                    resp.content,
+                )
                 media_paths.append(str(file_path))
-                content_parts.append(f"[attachment: {file_path}]")
+                content_parts.append(self._format_incoming_attachment_ref('attachment', file_path))
             except Exception as e:
                 logger.warning(f"Failed to download Discord attachment: {e}")
                 content_parts.append(f"[attachment: {filename} - download failed]")
@@ -277,6 +278,16 @@ class Discord_Client(Chat_Client):
             except Exception as e:
                 logger.error(f"Error sending Discord message: {e}")
 
+    async def _send_attachment_to_channel(self, item, channel_id):
+        """Send an attachment to a Discord channel via REST API."""
+        if not self._http:
+            return
+        url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages"
+        headers = {"Authorization": f"Bot {self.agent.config.chat_discord_token}"}
+        with open(item['abs_path'], 'rb') as file_obj:
+            files = {"files[0]": (item['name'], file_obj, item['mime_type'])}
+            await self._http.post(url, headers=headers, files=files)
+
     def send_message(self, message, receiver=None, subject=None):
         """Send a message to a user or channel."""
         if not self._http or not self._loop:
@@ -302,15 +313,25 @@ class Discord_Client(Chat_Client):
             return
 
         try:
+            normalized_message = self._normalize_outgoing_message(message)
             if self._loop.is_running():
-                asyncio.run_coroutine_threadsafe(
-                    self._send_to_channel(str(message), channel_id),
-                    self._loop
-                ).result(timeout=10)
+                for item in normalized_message:
+                    coro = (
+                        self._send_to_channel(item['text'], channel_id)
+                        if item['kind'] == 'text'
+                        else self._send_attachment_to_channel(item, channel_id)
+                    )
+                    asyncio.run_coroutine_threadsafe(coro, self._loop).result(timeout=10)
             else:
                 loop = asyncio.new_event_loop()
                 try:
-                    loop.run_until_complete(self._send_to_channel(str(message), channel_id))
+                    for item in normalized_message:
+                        coro = (
+                            self._send_to_channel(item['text'], channel_id)
+                            if item['kind'] == 'text'
+                            else self._send_attachment_to_channel(item, channel_id)
+                        )
+                        loop.run_until_complete(coro)
                 finally:
                     loop.close()
         except Exception as e:

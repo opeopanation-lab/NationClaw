@@ -415,16 +415,14 @@ class Telegram_Client(Chat_Client):
             try:
                 file = await self._app.bot.get_file(media_file.file_id)
                 ext = self._get_extension(media_type, getattr(media_file, 'mime_type', None))
-
-                # Save to ~/.mobileclaw/media/
-                media_dir = Path.home() / ".mobileclaw" / "media"
-                media_dir.mkdir(parents=True, exist_ok=True)
-
-                file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
-                await file.download_to_drive(str(file_path))
+                file_path = self._save_incoming_media_bytes(
+                    'telegram',
+                    f"{media_file.file_id[:16]}{ext}",
+                    bytes(await file.download_as_bytearray()),
+                )
 
                 media_paths.append(str(file_path))
-                content_parts.append(f"[{media_type}: {file_path}]")
+                content_parts.append(self._format_incoming_attachment_ref(media_type, file_path))
 
                 logger.debug(f"Downloaded {media_type} to {file_path}")
             except Exception as e:
@@ -531,24 +529,43 @@ class Telegram_Client(Chat_Client):
     async def _async_send_message(self, message, chat_id):
         """Async helper to send message."""
         try:
-            plain_message = str(message)
-            # Convert markdown to Telegram HTML
-            html_content = _markdown_to_telegram_html(plain_message)
+            for item in self._normalize_outgoing_message(message):
+                if item['kind'] == 'text':
+                    plain_message = item['text']
+                    html_content = _markdown_to_telegram_html(plain_message)
 
-            try:
-                await self._app.bot.send_message(
-                    chat_id=int(chat_id),
-                    text=html_content,
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                # Fallback to plain text if HTML parsing fails
-                logger.warning(f'HTML parse failed, falling back to plain text: {e}')
-                await self._app.bot.send_message(
-                    chat_id=int(chat_id),
-                    text=plain_message
-                )
-            self._append_history(str(chat_id), 'assistant', plain_message)
+                    try:
+                        await self._app.bot.send_message(
+                            chat_id=int(chat_id),
+                            text=html_content,
+                            parse_mode="HTML"
+                        )
+                    except Exception as e:
+                        logger.warning(f'HTML parse failed, falling back to plain text: {e}')
+                        await self._app.bot.send_message(
+                            chat_id=int(chat_id),
+                            text=plain_message
+                        )
+                    self._append_history(str(chat_id), 'assistant', plain_message)
+                    continue
+
+                message_type = item['message_type']
+                file_path = item['abs_path']
+                display_text = f"[{message_type}: {item['rel_path']}]"
+
+                with open(file_path, 'rb') as file_obj:
+                    if message_type == 'image':
+                        await self._app.bot.send_photo(
+                            chat_id=int(chat_id),
+                            photo=file_obj,
+                        )
+                    else:
+                        await self._app.bot.send_document(
+                            chat_id=int(chat_id),
+                            document=file_obj,
+                            filename=item['name'],
+                        )
+                self._append_history(str(chat_id), 'assistant', display_text)
         except Exception as e:
             logger.error(f'Error in async send: {e}')
             raise
