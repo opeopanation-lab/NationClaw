@@ -286,7 +286,7 @@ class Discord_Client(Chat_Client):
             files = {"files[0]": (item['name'], file_obj, item['mime_type'])}
             await self._http.post(url, headers=headers, files=files)
 
-    def send_message(self, message, receiver=None, subject=None):
+    def send_message(self, message, receiver=None, _type=None):
         """Send a message to a user or channel."""
         if not self._http or not self._loop:
             logger.warning('Discord client not initialized')
@@ -340,29 +340,6 @@ class Discord_Client(Chat_Client):
         sender = getattr(previous_message, 'sender', None)
         if sender:
             self.send_message(content, receiver=sender)
-
-    def send_to_org(self, message, subject="General"):
-        """Send a message to the manager."""
-        if self.org_manager_user_id:
-            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
-
-    def send_to_log(self, message, subject="Log"):
-        """Send a message to the log receiver."""
-        if self._manager_only_enabled() and self.org_manager_user_id:
-            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
-            return
-        if self.log_receiver is None:
-            return
-        if not self._http or not self._loop:
-            return
-        try:
-            if self._loop.is_running():
-                asyncio.run_coroutine_threadsafe(
-                    self._send_to_channel(str(message), self.log_receiver),
-                    self._loop
-                ).result(timeout=10)
-        except Exception as e:
-            logger.exception(f'Error sending to log receiver: {e}')
 
     def get_history_messages(self, msg, max_previous_messages=10):
         """Get message history. Returns empty list."""

@@ -9,6 +9,7 @@ import base64
 import os
 from threading import Thread
 import structlog
+from urllib.parse import quote, unquote
 
 try:
     import zulip
@@ -41,6 +42,20 @@ class Zulip_Client(Chat_Client):
         self.log_receiver = None  # Set via /log_here command
         # Report receiver for send_message when receiver is None
         self.report_receiver = None  # Set via /report_here command
+
+    @staticmethod
+    def _encode_stream_receiver(stream_name, topic=None):
+        stream = quote(str(stream_name or ''), safe='')
+        topic = quote(str(topic or ''), safe='')
+        return f'group:{stream}?topic={topic}'
+
+    @staticmethod
+    def _decode_stream_receiver(receiver):
+        payload = str(receiver)[6:]
+        if '?topic=' in payload:
+            stream_part, topic_part = payload.split('?topic=', 1)
+            return unquote(stream_part), unquote(topic_part)
+        return unquote(payload), None
 
     def _replace_and_download_incoming_attachments(self, content):
         """Download Zulip uploaded attachments and replace links with local temp paths."""
@@ -156,7 +171,7 @@ class Zulip_Client(Chat_Client):
                 # The agent has been mentioned
                 pass
             group_name = msg['display_recipient']
-            sender_name_new = f"group:{group_name}"
+            sender_name_new = self._encode_stream_receiver(group_name, msg.get('subject'))
 
         # Maintain user mapping for future message sending
         self._user_mapping[sender_name] = sender_email
@@ -187,8 +202,7 @@ class Zulip_Client(Chat_Client):
             if msg['type'] == 'private':
                 receiver = msg['sender_email']
             else:
-                # For stream messages, use "group:stream_name" format
-                receiver = f"group:{msg['display_recipient']}"
+                receiver = self._encode_stream_receiver(msg['display_recipient'], msg.get('subject'))
 
             if command.endswith("/log_here"):
                 # Set local log receiver
@@ -229,7 +243,7 @@ class Zulip_Client(Chat_Client):
         except Exception as e:
             logger.exception(f"Error handling command: {e}")
     
-    def send_message(self, message, receiver=None, subject=None):
+    def send_message(self, message, receiver=None, _type=None):
         """
         Send a message to receiver.
 
@@ -279,12 +293,11 @@ class Zulip_Client(Chat_Client):
 
             # Check if receiver has "group:" prefix
             if receiver.startswith("group:"):
-                # Stream message - remove the prefix
-                stream_name = receiver[6:]  # Remove "group:" prefix
+                stream_name, topic = self._decode_stream_receiver(receiver)
                 msg = {
                     'type': 'stream',
                     'to': stream_name,
-                    'subject': subject if subject else 'General',
+                    'subject': topic or _type or 'General',
                     'content': outgoing_content,
                 }
             else:
@@ -450,7 +463,7 @@ class Zulip_Client(Chat_Client):
             logger.exception(f'Failed to create stream {stream_name}: {e}', action='create_stream', status='failed')
             raise
 
-    def _send_to_stream(self, stream_name, message, subject="General", description=None):
+    def _send_to_stream(self, stream_name, message, _type="org", description=None):
         """
         Helper method to send a message to a stream, creating it if it doesn't exist.
 
@@ -474,45 +487,8 @@ class Zulip_Client(Chat_Client):
 
         # Send the message
         try:
-            self.send_message(message, receiver=f'group:{stream_name}', subject=subject)
+            self.send_message(message, receiver=f'group:{stream_name}', _type=_type)
             logger.debug(f'Message sent to stream: {stream_name}', action='_send_to_stream', status='success')
         except Exception as e:
             logger.exception(f'Failed to send message to stream {stream_name}: {e}')
             raise
-
-    def send_to_org(self, message, subject="General"):
-        """
-        Sends a message to the organization stream.
-        Creates the stream if it doesn't exist.
-
-        Args:
-            message: Message content to send
-            subject: Subject/topic for the message (default: "General")
-        """
-        stream_name = f'{self.agent.org_name}'
-        description = f"Organization stream of {self.agent.org_name}"
-        self._send_to_stream(stream_name, message, subject, description)
-
-    def send_to_log(self, message, subject="Log"):
-        """
-        Sends a message to the self-reporting stream.
-        If log_receiver is set, sends to that receiver instead.
-
-        Args:
-            message: Message content to send
-            subject: Subject/topic for the message (default: "Log")
-        """
-        if self._manager_only_enabled() and self.org_manager_email:
-            self.send_message(message, receiver=self.org_manager_email, subject=subject)
-            return
-        if self.log_receiver is None:
-            # Default behavior: send to agent's self-reporting stream
-            stream_name = f'{self.agent.name}'
-            description = f"Self-reporting stream of {self.agent.name}"
-            self._send_to_stream(stream_name, message, subject, description)
-        else:
-            # Send to the configured log receiver
-            try:
-                self.send_message(message, receiver=self.log_receiver, subject=subject)
-            except Exception as e:
-                logger.exception(f'Error sending to log receiver: {e}')

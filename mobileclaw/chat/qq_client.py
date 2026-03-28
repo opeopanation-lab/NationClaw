@@ -239,7 +239,7 @@ class QQ_Client(Chat_Client):
         except Exception as e:
             logger.debug(f"Error sending text message: {e}")
 
-    def send_message(self, message, receiver=None, subject=None):
+    def send_message(self, message, receiver=None, _type=None):
         """Send a message to a user."""
         if not self._client:
             logger.warning('QQ client not initialized')
@@ -325,30 +325,6 @@ class QQ_Client(Chat_Client):
             self.send_message(content, receiver=sender)
         else:
             logger.warning('Cannot reply: no sender in previous message')
-
-    def send_to_org(self, message, subject="General"):
-        """Send a message to the manager."""
-        if self.org_manager_user_id:
-            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
-        else:
-            logger.warning('No org manager configured for QQ')
-
-    def send_to_log(self, message, subject="Log"):
-        """
-        Send a message to the log receiver.
-        If log_receiver is not set, returns without sending.
-        """
-        if self._manager_only_enabled() and self.org_manager_user_id:
-            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
-            return
-        if self.log_receiver is None:
-            logger.debug('No log receiver set, skipping send_to_log')
-            return
-
-        try:
-            self.send_message(message, receiver=self.log_receiver, subject=subject)
-        except Exception as e:
-            logger.exception(f'Error sending to log receiver: {e}')
 
     def get_history_messages(self, msg, max_previous_messages=100):
         """Get message history. Returns empty list as QQ API doesn't provide easy history access."""

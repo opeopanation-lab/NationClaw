@@ -528,7 +528,7 @@ class Weixin_Client(Chat_Client):
         if response_text:
             self.send_message(response_text, receiver=receiver_key)
 
-    def send_message(self, message, receiver=None, subject=None):
+    def send_message(self, message, receiver=None, _type=None):
         if not self.bot_token:
             err = 'send_message failed because weixin client not logged in'
             logger.error(err)
@@ -596,24 +596,6 @@ class Weixin_Client(Chat_Client):
             self.send_message(content, receiver=sender)
         else:
             logger.warning('Cannot reply: no sender in previous message')
-
-    def send_to_org(self, message, subject='General'):
-        if self.org_manager_user_id:
-            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
-        else:
-            logger.warning('No org manager configured for Weixin')
-
-    def send_to_log(self, message, subject='Log'):
-        if self._manager_only_enabled() and self.org_manager_user_id:
-            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
-            return
-        if self.log_receiver is None:
-            logger.debug('No log receiver set, skipping send_to_log')
-            return
-        try:
-            self.send_message(message, receiver=self.log_receiver, subject=subject)
-        except Exception as e:
-            logger.exception(f'Error sending to log receiver: {e}')
 
     def get_history_messages(self, receiver_key, max_previous_messages=10):
         with self._history_lock:

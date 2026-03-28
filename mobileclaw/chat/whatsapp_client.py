@@ -237,7 +237,7 @@ class WhatsApp_Client(Chat_Client):
         except Exception as e:
             logger.error(f"Error sending WhatsApp media: {e}")
 
-    def send_message(self, message, receiver=None, subject=None):
+    def send_message(self, message, receiver=None, _type=None):
         """Send a message to a user."""
         if not self._ws or not self._connected:
             logger.warning('WhatsApp client not connected')
@@ -291,27 +291,6 @@ class WhatsApp_Client(Chat_Client):
         sender = getattr(previous_message, 'sender', None)
         if sender:
             self.send_message(content, receiver=sender)
-
-    def send_to_org(self, message, subject="General"):
-        """Send a message to the manager."""
-        if self.org_manager_user_id:
-            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
-
-    def send_to_log(self, message, subject="Log"):
-        """Send a message to the log receiver."""
-        if self._manager_only_enabled() and self.org_manager_user_id:
-            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
-            return
-        if self.log_receiver is None:
-            return
-        try:
-            if self._loop and self._loop.is_running():
-                asyncio.run_coroutine_threadsafe(
-                    self._async_send(str(message), self.log_receiver),
-                    self._loop
-                ).result(timeout=10)
-        except Exception as e:
-            logger.exception(f'Error sending to log receiver: {e}')
 
     def get_history_messages(self, msg, max_previous_messages=10):
         """Get message history. Returns empty list."""

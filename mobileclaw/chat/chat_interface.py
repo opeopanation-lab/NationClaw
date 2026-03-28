@@ -127,26 +127,12 @@ class Chat_Interface(UniInterface):
         if client is not None and hasattr(client, 'send_reply'):
             client.send_reply(message, previous_message)
 
-    def send_to_org(self, message, subject="General", channel=None):
-        """
-        Send a message to the organization.
-
-        Args:
-            message: Message content to send
-            subject: Subject/topic for the message
-            channel: Channel to use (optional, defaults to default_chat_channel)
-        """
-        client = self._get_client(channel)
-        if client is not None and hasattr(client, 'send_to_org'):
-            client.send_to_org(message, subject)
-
-    def send_to_log(self, message, subject="Log", channel=None):
+    def send_to_log(self, message, channel=None):
         """
         Send a message to the agent's self-reporting stream.
 
         Args:
             message: Message content to send
-            subject: Subject/topic for the message
             channel: Channel to use (optional, defaults to log_channel or default_chat_channel)
         """
         if channel is None:
@@ -158,9 +144,9 @@ class Chat_Interface(UniInterface):
             receiver = None
         client = self._get_client(channel)
         if client is not None and hasattr(client, 'send_message'):
-            client.send_message(message, receiver=receiver)
+            client.send_message(message, receiver=receiver, _type='log')
 
-    def send_message(self, message, receiver=None, channel=None):
+    def send_message(self, message, receiver=None, channel=None, _type=None):
         """
         Send a message to the receiver.
 
@@ -176,4 +162,4 @@ class Chat_Interface(UniInterface):
             receiver = self.report_receiver['receiver']
         client = self._get_client(channel)
         if client is not None and hasattr(client, 'send_message'):
-            client.send_message(message, receiver)
+            client.send_message(message, receiver, _type=_type)

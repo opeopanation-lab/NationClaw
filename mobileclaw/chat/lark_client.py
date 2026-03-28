@@ -712,7 +712,7 @@ class Lark_Client(Chat_Client):
 
         return json.dumps(parsed, ensure_ascii=False) if isinstance(parsed, (dict, list)) else raw_content
     
-    def send_message(self, message, receiver=None, subject=None):
+    def send_message(self, message, receiver=None, _type=None):
         """
         Send a message to receiver.
 
@@ -924,7 +924,7 @@ class Lark_Client(Chat_Client):
             logger.exception(f'Failed to create chat {chat_name}: {e}', action='create_chat', status='failed')
             raise
 
-    def _send_to_chat(self, chat_name, message, subject=None, description=None):
+    def _send_to_chat(self, chat_name, message, _type=None, description=None):
         """
         Helper method to send a message to a chat, creating it if it doesn't exist.
 
@@ -950,43 +950,8 @@ class Lark_Client(Chat_Client):
 
         # Send the message
         try:
-            self.send_message(message, receiver=f'group:{chat_id}', subject=subject)
+            self.send_message(message, receiver=f'group:{chat_id}', _type=_type)
             logger.debug(f'Message sent to chat: {chat_name}', action='_send_to_chat', status='success')
         except Exception as e:
             logger.exception(f'Failed to send message to chat {chat_name}: {e}')
             raise
-
-    def send_to_org(self, message, subject=None):
-        """
-        Sends a message to the organization chat.
-        Creates the chat if it doesn't exist.
-
-        Args:
-            message: Message content to send
-            subject: Subject/topic for the message (optional)
-        """
-        chat_name = f'{self.agent.org_name}'
-        description = f"Organization chat of {self.agent.org_name}"
-        self._send_to_chat(chat_name, message, subject, description)
-
-    def send_to_log(self, message, subject=None):
-        """
-        Sends a message to the log receiver chat.
-        If log_receiver is not set, returns without sending.
-
-        Args:
-            message: Message content to send
-            subject: Subject/topic for the message (optional)
-        """
-        if self._manager_only_enabled() and self.org_manager_open_id:
-            self.send_message(message, receiver=self.org_manager_open_id, subject=subject)
-            return
-        if self.log_receiver is None:
-            logger.debug('No log receiver set, skipping send_to_log')
-            return
-
-        try:
-            # Send to the configured log receiver chat
-            self.send_message(message, receiver=f"group:{self.log_receiver}", subject=subject)
-        except Exception as e:
-            logger.exception(f'Error sending to log receiver: {e}')

@@ -756,7 +756,7 @@ class DeviceControllerBase(UniInterface):
         """通知用户截图为黑屏，并请求手动接管"""
         try:
             # 根据任务语言选择消息
-            task_language = getattr(self.agent, 'task_language', 'zh')
+            task_language = getattr(self.agent, 'task_language', 'en')
             if task_language == 'en':
                 message = f'The screen captured from device "{self.device_name}" is black. The device may be in a privacy protection screen, and the task execution may encounter errors. Please manually handle it and click "Takeover Ended" when done.'
             else:
