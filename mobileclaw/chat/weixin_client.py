@@ -256,9 +256,13 @@ class Weixin_Client(Chat_Client):
         if not from_user_id:
             return
 
-        self._set_org_manager_if_missing(from_user_id)
+        org_manager_set = self._set_org_manager_if_missing(from_user_id)
+        if org_manager_set:
+            self.send_message(self._org_manager_status_text(), receiver=from_user_id)
         if not self._should_handle_incoming(from_user_id, self.org_manager_user_id, logger=logger, channel='weixin'):
             return
+        if self._ensure_report_receiver_global('weixin', receiver_key):
+            self.send_message(self._receiver_status_text('report', True), receiver=receiver_key)
 
         group_id = message.get('group_id')
         receiver_key = f'group:{group_id}' if group_id else from_user_id
@@ -437,11 +441,12 @@ class Weixin_Client(Chat_Client):
 
     def _set_org_manager_if_missing(self, sender_id):
         if self.org_manager_user_id not in (None, '', '?'):
-            return
+            return False
         self.org_manager_user_id = sender_id
         if hasattr(self.agent.config, 'chat_weixin_org_manager'):
             self.agent.config.chat_weixin_org_manager = sender_id
         logger.info(f'Weixin org manager initialized to {sender_id}')
+        return True
 
     def _remember_route(self, receiver_key, message):
         route = {
@@ -509,22 +514,16 @@ class Weixin_Client(Chat_Client):
         response_text = None
         if command == '/log_here':
             self.log_receiver = receiver_key
-            self.agent.chat.log_channel = 'weixin'
-            response_text = '✅ Log receiver set. Logs will be sent here.'
+            response_text = self._set_log_receiver_global('weixin', receiver_key)
         elif command == '/stop_log_here':
             self.log_receiver = None
-            if self.agent.chat.log_channel == 'weixin':
-                self.agent.chat.log_channel = None
-            response_text = '✅ Log receiver cleared.'
+            response_text = self._clear_log_receiver_global()
         elif command == '/report_here':
             self.report_receiver = receiver_key
-            self.agent.chat.report_channel = 'weixin'
-            response_text = '✅ Report receiver set. Progress reports will be sent here.'
+            response_text = self._set_report_receiver_global('weixin', receiver_key)
         elif command == '/stop_report_here':
             self.report_receiver = None
-            if self.agent.chat.report_channel == 'weixin':
-                self.agent.chat.report_channel = None
-            response_text = '✅ Report receiver cleared. Reports will be sent to org_manager.'
+            response_text = self._clear_report_receiver_global()
 
         if response_text:
             self.send_message(response_text, receiver=receiver_key)
@@ -542,7 +541,7 @@ class Weixin_Client(Chat_Client):
             if self.report_receiver:
                 receiver = self.report_receiver
             else:
-                receiver = self.org_manager_user_id
+                return None
 
         if not receiver:
             err = 'No receiver specified for Weixin message'

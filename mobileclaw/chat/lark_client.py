@@ -297,11 +297,13 @@ class Lark_Client(Chat_Client):
             if not content:
                 return
 
-            self._set_org_manager_if_missing(
+            org_manager_set = self._set_org_manager_if_missing(
                 'org_manager_open_id',
                 'chat_lark_org_manager',
                 sender_id,
             )
+            if org_manager_set:
+                await self._send_text_reply(self._org_manager_status_text(), message_id)
 
             # Handle commands (only from org_manager)
             if content.startswith('/') and sender_id == self.org_manager_open_id:
@@ -336,6 +338,8 @@ class Lark_Client(Chat_Client):
             # Handle the message
             if not self._should_handle_incoming(sender_id, self.org_manager_open_id, logger=logger, channel='lark'):
                 return
+            if self._ensure_report_receiver_global('lark', sender_name):
+                await self._send_text_reply(self._receiver_status_text('report', True), message_id)
             if hasattr(self.agent, 'handle_message'):
                 self.agent.handle_message(
                     message=content,
@@ -383,32 +387,22 @@ class Lark_Client(Chat_Client):
         try:
             if command.endswith("/log_here"):
                 self.log_receiver = chat_id
-                # Set global log channel
-                self.agent.chat.log_channel = 'lark'
-                response_text = f"✅ Log receiver set to this chat. Logs will be sent here."
-                logger.info(f"Log receiver set to chat_id: {chat_id}, global log channel set to lark")
+                response_text = self._set_log_receiver_global('lark', f"group:{chat_id}")
+                logger.info(f"Log receiver set to chat_id: {chat_id}")
 
             elif command.endswith("/stop_log_here"):
                 self.log_receiver = None
-                # Clear global log channel if it was lark
-                if self.agent.chat.log_channel == 'lark':
-                    self.agent.chat.log_channel = None
-                response_text = f"✅ Log receiver cleared. Logs will no longer be sent."
+                response_text = self._clear_log_receiver_global()
                 logger.info("Log receiver cleared")
 
             elif command.endswith("/report_here"):
                 self.report_receiver = chat_id
-                # Set global report channel
-                self.agent.chat.report_channel = 'lark'
-                response_text = f"✅ Report receiver set to this chat. Progress reports will be sent here."
-                logger.info(f"Report receiver set to chat_id: {chat_id}, global report channel set to lark")
+                response_text = self._set_report_receiver_global('lark', f"group:{chat_id}")
+                logger.info(f"Report receiver set to chat_id: {chat_id}")
 
             elif command.endswith("/stop_report_here"):
                 self.report_receiver = None
-                # Clear global report channel if it was lark
-                if self.agent.chat.report_channel == 'lark':
-                    self.agent.chat.report_channel = None
-                response_text = f"✅ Report receiver cleared. Reports will be sent to org_manager."
+                response_text = self._clear_report_receiver_global()
                 logger.info("Report receiver cleared")
 
             else:

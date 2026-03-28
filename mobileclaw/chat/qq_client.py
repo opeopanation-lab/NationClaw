@@ -138,11 +138,13 @@ class QQ_Client(Chat_Client):
             if not content:
                 return
 
-            self._set_org_manager_if_missing(
+            org_manager_set = self._set_org_manager_if_missing(
                 'org_manager_user_id',
                 'chat_qq_org_manager',
                 user_id,
             )
+            if org_manager_set:
+                await self._async_send_message(self._org_manager_status_text(), user_id)
 
             # Handle commands (only from org_manager)
             if content.startswith('/') and user_id == self.org_manager_user_id:
@@ -150,6 +152,8 @@ class QQ_Client(Chat_Client):
                 return
             if not self._should_handle_incoming(user_id, self.org_manager_user_id, logger=logger, channel='qq'):
                 return
+            if self._ensure_report_receiver_global('qq', user_id):
+                await self._async_send_message(self._receiver_status_text('report', True), user_id)
 
             # Store chat_id for replies
             self._chat_id_mapping[user_id] = user_id
@@ -189,32 +193,22 @@ class QQ_Client(Chat_Client):
         try:
             if command.endswith("/log_here"):
                 self.log_receiver = user_id
-                # Set global log channel
-                self.agent.chat.log_channel = 'qq'
-                response_text = "✅ Log receiver set. Logs will be sent to you."
-                logger.info(f"Log receiver set to user_id: {user_id}, global log channel set to qq")
+                response_text = self._set_log_receiver_global('qq', user_id)
+                logger.info(f"Log receiver set to user_id: {user_id}")
 
             elif command.endswith("/stop_log_here"):
                 self.log_receiver = None
-                # Clear global log channel if it was qq
-                if self.agent.chat.log_channel == 'qq':
-                    self.agent.chat.log_channel = None
-                response_text = "✅ Log receiver cleared. Logs will no longer be sent."
+                response_text = self._clear_log_receiver_global()
                 logger.info("Log receiver cleared")
 
             elif command.endswith("/report_here"):
                 self.report_receiver = user_id
-                # Set global report channel
-                self.agent.chat.report_channel = 'qq'
-                response_text = "✅ Report receiver set. Progress reports will be sent to you."
-                logger.info(f"Report receiver set to user_id: {user_id}, global report channel set to qq")
+                response_text = self._set_report_receiver_global('qq', user_id)
+                logger.info(f"Report receiver set to user_id: {user_id}")
 
             elif command.endswith("/stop_report_here"):
                 self.report_receiver = None
-                # Clear global report channel if it was qq
-                if self.agent.chat.report_channel == 'qq':
-                    self.agent.chat.report_channel = None
-                response_text = "✅ Report receiver cleared. Reports will be sent to org_manager."
+                response_text = self._clear_report_receiver_global()
                 logger.info("Report receiver cleared")
 
             else:
@@ -333,7 +327,7 @@ class QQ_Client(Chat_Client):
             logger.warning('Cannot reply: no sender in previous message')
 
     def send_to_org(self, message, subject="General"):
-        """Send a message to the organization manager."""
+        """Send a message to the manager."""
         if self.org_manager_user_id:
             self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
         else:

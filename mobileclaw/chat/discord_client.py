@@ -188,11 +188,13 @@ class Discord_Client(Chat_Client):
         # Store channel_id for replies
         self._channel_ids[sender_id] = channel_id
 
-        self._set_org_manager_if_missing(
+        org_manager_set = self._set_org_manager_if_missing(
             'org_manager_user_id',
             'chat_discord_org_manager',
             sender_id,
         )
+        if org_manager_set:
+            await self._send_to_channel(self._org_manager_status_text(), channel_id)
 
         # Build content from text and attachments
         content_parts = [content] if content else []
@@ -229,6 +231,8 @@ class Discord_Client(Chat_Client):
             return
         if not self._should_handle_incoming(sender_id, self.org_manager_user_id, logger=logger, channel='discord'):
             return
+        if self._ensure_report_receiver_global('discord', channel_id):
+            await self._send_to_channel(self._receiver_status_text('report', True), channel_id)
 
         # Call agent's message handler
         if hasattr(self.agent, 'handle_message'):
@@ -243,22 +247,16 @@ class Discord_Client(Chat_Client):
         """Handle bot commands from org_manager."""
         if command == '/log_here':
             self.log_receiver = channel_id
-            self.agent.chat.log_channel = 'discord'
-            await self._send_to_channel("Log receiver set to this channel.", channel_id)
+            await self._send_to_channel(self._set_log_receiver_global('discord', channel_id), channel_id)
         elif command == '/stop_log_here':
             self.log_receiver = None
-            if self.agent.chat.log_channel == 'discord':
-                self.agent.chat.log_channel = None
-            await self._send_to_channel("Log receiver cleared.", channel_id)
+            await self._send_to_channel(self._clear_log_receiver_global(), channel_id)
         elif command == '/report_here':
             self.report_receiver = channel_id
-            self.agent.chat.report_channel = 'discord'
-            await self._send_to_channel("Report receiver set to this channel.", channel_id)
+            await self._send_to_channel(self._set_report_receiver_global('discord', channel_id), channel_id)
         elif command == '/stop_report_here':
             self.report_receiver = None
-            if self.agent.chat.report_channel == 'discord':
-                self.agent.chat.report_channel = None
-            await self._send_to_channel("Report receiver cleared.", channel_id)
+            await self._send_to_channel(self._clear_report_receiver_global(), channel_id)
 
     async def _send_to_channel(self, text, channel_id):
         """Send a message to a Discord channel via REST API."""
@@ -344,7 +342,7 @@ class Discord_Client(Chat_Client):
             self.send_message(content, receiver=sender)
 
     def send_to_org(self, message, subject="General"):
-        """Send a message to the organization manager."""
+        """Send a message to the manager."""
         if self.org_manager_user_id:
             self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
 

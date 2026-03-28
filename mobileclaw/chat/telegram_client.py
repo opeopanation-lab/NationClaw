@@ -117,13 +117,14 @@ class Telegram_Client(Chat_Client):
         """Persist the first Telegram sender as org manager when not configured."""
         current_value = getattr(self, attr_name, None)
         if current_value not in (None, "", "?"):
-            return
+            return False
 
         setattr(self, attr_name, sender_id)
         if hasattr(self.agent.config, config_name):
             setattr(self.agent.config, config_name, sender_id)
 
         logger.info(f"Telegram org manager initialized to {sender_id}")
+        return True
 
     def _remember_chat_id(self, sender_id, chat_id):
         """Cache chat_id for both raw numeric ID and username-qualified ID."""
@@ -278,14 +279,12 @@ class Telegram_Client(Chat_Client):
 
         # Check if user is org_manager
         if user_id != self.org_manager_user_id and str(user.id) != self.org_manager_user_id:
-            await update.message.reply_text("❌ Only the organization manager can use this command.")
+            await update.message.reply_text("❌ Only the manager can use this command.")
             return
 
         self.log_receiver = user_id
-        # Set global log channel
-        self.agent.chat.log_channel = 'telegram'
-        logger.info(f"Log receiver set to user_id: {user_id}, global log channel set to telegram")
-        await update.message.reply_text("✅ Log receiver set. Logs will be sent to you.")
+        logger.info(f"Log receiver set to user_id: {user_id}")
+        await update.message.reply_text(self._set_log_receiver_global('telegram', user_id))
 
     async def _on_stop_log_here(self, update, context):
         """Handle /stop_log_here command."""
@@ -299,15 +298,12 @@ class Telegram_Client(Chat_Client):
 
         # Check if user is org_manager
         if user_id != self.org_manager_user_id and str(user.id) != self.org_manager_user_id:
-            await update.message.reply_text("❌ Only the organization manager can use this command.")
+            await update.message.reply_text("❌ Only the manager can use this command.")
             return
 
         self.log_receiver = None
-        # Clear global log channel if it was telegram
-        if self.agent.chat.log_channel == 'telegram':
-            self.agent.chat.log_channel = None
         logger.info("Log receiver cleared")
-        await update.message.reply_text("✅ Log receiver cleared. Logs will no longer be sent.")
+        await update.message.reply_text(self._clear_log_receiver_global())
 
     async def _on_report_here(self, update, context):
         """Handle /report_here command."""
@@ -321,14 +317,12 @@ class Telegram_Client(Chat_Client):
 
         # Check if user is org_manager
         if user_id != self.org_manager_user_id and str(user.id) != self.org_manager_user_id:
-            await update.message.reply_text("❌ Only the organization manager can use this command.")
+            await update.message.reply_text("❌ Only the manager can use this command.")
             return
 
         self.report_receiver = user_id
-        # Set global report channel
-        self.agent.chat.report_channel = 'telegram'
-        logger.info(f"Report receiver set to user_id: {user_id}, global report channel set to telegram")
-        await update.message.reply_text("✅ Report receiver set. Progress reports will be sent to you.")
+        logger.info(f"Report receiver set to user_id: {user_id}")
+        await update.message.reply_text(self._set_report_receiver_global('telegram', user_id))
 
     async def _on_stop_report_here(self, update, context):
         """Handle /stop_report_here command."""
@@ -342,15 +336,12 @@ class Telegram_Client(Chat_Client):
 
         # Check if user is org_manager
         if user_id != self.org_manager_user_id and str(user.id) != self.org_manager_user_id:
-            await update.message.reply_text("❌ Only the organization manager can use this command.")
+            await update.message.reply_text("❌ Only the manager can use this command.")
             return
 
         self.report_receiver = None
-        # Clear global report channel if it was telegram
-        if self.agent.chat.report_channel == 'telegram':
-            self.agent.chat.report_channel = None
         logger.info("Report receiver cleared")
-        await update.message.reply_text("✅ Report receiver cleared. Reports will be sent to org_manager.")
+        await update.message.reply_text(self._clear_report_receiver_global())
 
     async def _on_message(self, update, context):
         """Handle incoming messages (text, photos, voice, documents)."""
@@ -369,19 +360,17 @@ class Telegram_Client(Chat_Client):
         # Store chat_id for replies
         self._remember_chat_id(sender_id, chat_id)
 
-        self._set_org_manager_if_missing(
+        org_manager_set = self._set_org_manager_if_missing(
             'org_manager_user_id',
             'chat_telegram_org_manager',
             sender_id,
         )
+        if org_manager_set:
+            await message.reply_text(self._org_manager_status_text())
         if not self._should_handle_incoming(sender_id, self.org_manager_user_id, logger=logger, channel='telegram'):
             return
-
-        self._set_org_manager_if_missing(
-            'org_manager_user_id',
-            'chat_telegram_org_manager',
-            sender_id,
-        )
+        if self._ensure_report_receiver_global('telegram', sender_id):
+            await message.reply_text(self._receiver_status_text('report', True))
 
         # Build content from text and/or media
         content_parts = []
@@ -485,11 +474,10 @@ class Telegram_Client(Chat_Client):
             receiver = manager_receiver
 
         if receiver is None:
-            # Use report_receiver if set, otherwise default to org_manager
             if self.report_receiver:
                 receiver = self.report_receiver
             else:
-                receiver = self.org_manager_user_id
+                return None
 
         if not receiver:
             logger.warning('No receiver specified for Telegram message')
@@ -580,7 +568,7 @@ class Telegram_Client(Chat_Client):
             logger.warning('Cannot reply: no sender in previous message')
 
     def send_to_org(self, message, subject="General"):
-        """Send a message to the organization manager."""
+        """Send a message to the manager."""
         if self.org_manager_user_id:
             self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
         else:

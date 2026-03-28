@@ -166,14 +166,51 @@ class Chat_Client(UniInterface):
     def _format_incoming_attachment_ref(self, attachment_type, file_path):
         return f'[{attachment_type}: {self._relative_to_agent_dir(file_path)}]'
 
+    @staticmethod
+    def _receiver_status_text(kind, enabled):
+        if kind == 'log':
+            return (
+                "✅ Log receiver set. Logs will be sent to you. Reply /stop_log_here to cancel."
+                if enabled else
+                "✅ Log receiver cleared. Logs will no longer be sent here."
+            )
+        return (
+            "✅ Report receiver set. Progress will be sent to you. Reply /stop_report_here to cancel."
+            if enabled else
+            "✅ Report receiver cleared. Progress will no longer be sent here."
+        )
+
+    @staticmethod
+    def _org_manager_status_text():
+        return "✅ Org manager set to you. You can use /log_here or /report_here to manage delivery."
+
+    def _set_log_receiver_global(self, channel, receiver):
+        self.agent.chat.set_log_receiver(channel, receiver)
+        return self._receiver_status_text('log', True)
+
+    def _clear_log_receiver_global(self):
+        self.agent.chat.clear_log_receiver()
+        return self._receiver_status_text('log', False)
+
+    def _set_report_receiver_global(self, channel, receiver):
+        self.agent.chat.set_report_receiver(channel, receiver)
+        return self._receiver_status_text('report', True)
+
+    def _clear_report_receiver_global(self):
+        self.agent.chat.clear_report_receiver()
+        return self._receiver_status_text('report', False)
+
+    def _ensure_report_receiver_global(self, channel, receiver):
+        return self.agent.chat.ensure_report_receiver(channel, receiver)
+
     def _set_org_manager_if_missing(self, local_attr_name, config_attr_name, sender):
         """Bind the first valid sender as org_manager when it is not configured."""
         if not sender:
-            return
+            return False
 
         current_org_manager = getattr(self, local_attr_name, None)
         if current_org_manager:
-            return
+            return False
 
         setattr(self, local_attr_name, sender)
         if hasattr(self.agent, "config"):
@@ -185,3 +222,4 @@ class Chat_Client(UniInterface):
             org_manager=sender,
             config_key=config_attr_name,
         )
+        return True

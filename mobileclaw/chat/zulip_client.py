@@ -136,11 +136,13 @@ class Zulip_Client(Chat_Client):
         sender_id = msg['sender_id']
         sender_name = msg['sender_full_name']
 
-        self._set_org_manager_if_missing(
+        org_manager_set = self._set_org_manager_if_missing(
             'org_manager_email',
             'chat_zulip_org_manager',
             sender_email,
         )
+        if org_manager_set:
+            self.send_reply(self._org_manager_status_text(), msg)
 
         # Handle commands (only from org_manager)
         if content.startswith('/') and sender_email == self.org_manager_email:
@@ -168,6 +170,8 @@ class Zulip_Client(Chat_Client):
         history_content = "\n".join([f'[{m[2]}] {m[0]}: {m[1]}' for m in history_messages])
         if not self._should_handle_incoming(sender_email, self.org_manager_email, logger=logger, channel='zulip'):
             return
+        if self._ensure_report_receiver_global('zulip', sender_name_new):
+            self.send_reply(self._receiver_status_text('report', True), msg)
         self.agent.handle_message(content, history=history_content, sender=sender_name_new, channel='zulip')
 
     def _handle_command(self, command: str, msg):
@@ -189,33 +193,23 @@ class Zulip_Client(Chat_Client):
             if command.endswith("/log_here"):
                 # Set local log receiver
                 self.log_receiver = receiver
-                # Set global log channel
-                self.agent.chat.log_channel = 'zulip'
-                response_text = "✅ Log receiver set to this chat. Logs will be sent here."
-                logger.info(f"Log receiver set to: {receiver}, global log channel set to zulip")
+                response_text = self._set_log_receiver_global('zulip', receiver)
+                logger.info(f"Log receiver set to: {receiver}")
 
             elif command.endswith("/stop_log_here"):
                 self.log_receiver = None
-                # Clear global log channel if it was zulip
-                if self.agent.chat.log_channel == 'zulip':
-                    self.agent.chat.log_channel = None
-                response_text = "✅ Log receiver cleared. Logs will no longer be sent."
+                response_text = self._clear_log_receiver_global()
                 logger.info("Log receiver cleared")
 
             elif command.endswith("/report_here"):
                 # Set local report receiver
                 self.report_receiver = receiver
-                # Set global report channel
-                self.agent.chat.report_channel = 'zulip'
-                response_text = "✅ Report receiver set to this chat. Progress reports will be sent here."
-                logger.info(f"Report receiver set to: {receiver}, global report channel set to zulip")
+                response_text = self._set_report_receiver_global('zulip', receiver)
+                logger.info(f"Report receiver set to: {receiver}")
 
             elif command.endswith("/stop_report_here"):
                 self.report_receiver = None
-                # Clear global report channel if it was zulip
-                if self.agent.chat.report_channel == 'zulip':
-                    self.agent.chat.report_channel = None
-                response_text = "✅ Report receiver cleared. Reports will be sent to org_manager."
+                response_text = self._clear_report_receiver_global()
                 logger.info("Report receiver cleared")
 
             else:

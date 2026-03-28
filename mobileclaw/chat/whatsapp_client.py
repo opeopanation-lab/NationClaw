@@ -123,11 +123,13 @@ class WhatsApp_Client(Chat_Client):
             # Store full jid for replies
             self._chat_ids[sender_id] = sender
 
-            self._set_org_manager_if_missing(
+            org_manager_set = self._set_org_manager_if_missing(
                 'org_manager_user_id',
                 'chat_whatsapp_org_manager',
                 sender_id,
             )
+            if org_manager_set:
+                await self._async_send(self._org_manager_status_text(), sender)
 
             content_parts = [content] if content else []
             if media_type:
@@ -158,6 +160,8 @@ class WhatsApp_Client(Chat_Client):
                 return
             if not self._should_handle_incoming(sender_id, self.org_manager_user_id, logger=logger, channel='whatsapp'):
                 return
+            if self._ensure_report_receiver_global('whatsapp', sender):
+                await self._async_send(self._receiver_status_text('report', True), sender)
 
             # Call agent's message handler
             if hasattr(self.agent, 'handle_message'):
@@ -186,22 +190,16 @@ class WhatsApp_Client(Chat_Client):
         """Handle bot commands from org_manager."""
         if command == '/log_here':
             self.log_receiver = chat_id
-            self.agent.chat.log_channel = 'whatsapp'
-            await self._async_send("Log receiver set.", chat_id)
+            await self._async_send(self._set_log_receiver_global('whatsapp', chat_id), chat_id)
         elif command == '/stop_log_here':
             self.log_receiver = None
-            if self.agent.chat.log_channel == 'whatsapp':
-                self.agent.chat.log_channel = None
-            await self._async_send("Log receiver cleared.", chat_id)
+            await self._async_send(self._clear_log_receiver_global(), chat_id)
         elif command == '/report_here':
             self.report_receiver = chat_id
-            self.agent.chat.report_channel = 'whatsapp'
-            await self._async_send("Report receiver set.", chat_id)
+            await self._async_send(self._set_report_receiver_global('whatsapp', chat_id), chat_id)
         elif command == '/stop_report_here':
             self.report_receiver = None
-            if self.agent.chat.report_channel == 'whatsapp':
-                self.agent.chat.report_channel = None
-            await self._async_send("Report receiver cleared.", chat_id)
+            await self._async_send(self._clear_report_receiver_global(), chat_id)
 
     async def _async_send(self, text, chat_id):
         """Send a message through the WhatsApp bridge."""
@@ -295,7 +293,7 @@ class WhatsApp_Client(Chat_Client):
             self.send_message(content, receiver=sender)
 
     def send_to_org(self, message, subject="General"):
-        """Send a message to the organization manager."""
+        """Send a message to the manager."""
         if self.org_manager_user_id:
             self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
 

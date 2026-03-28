@@ -173,11 +173,16 @@ class Slack_Client(Chat_Client):
         # Store channel_id for replies
         self._channel_ids[sender_id] = chat_id
 
-        self._set_org_manager_if_missing(
+        org_manager_set = self._set_org_manager_if_missing(
             'org_manager_user_id',
             'chat_slack_org_manager',
             sender_id,
         )
+        if org_manager_set and self._web_client:
+            try:
+                await self._web_client.chat_postMessage(channel=chat_id, text=self._org_manager_status_text(), thread_ts=thread_ts)
+            except Exception as e:
+                logger.error(f"Error sending Slack org manager response: {e}")
 
         # Strip bot mention from text
         if self._bot_user_id:
@@ -203,6 +208,11 @@ class Slack_Client(Chat_Client):
             return
         if not self._should_handle_incoming(sender_id, self.org_manager_user_id, logger=logger, channel='slack'):
             return
+        if self._ensure_report_receiver_global('slack', chat_id) and self._web_client:
+            try:
+                await self._web_client.chat_postMessage(channel=chat_id, text=self._receiver_status_text('report', True), thread_ts=thread_ts)
+            except Exception as e:
+                logger.error(f"Error sending Slack report receiver response: {e}")
 
         # Call agent's message handler
         if hasattr(self.agent, 'handle_message'):
@@ -218,22 +228,16 @@ class Slack_Client(Chat_Client):
         response_text = None
         if command == '/log_here':
             self.log_receiver = channel_id
-            self.agent.chat.log_channel = 'slack'
-            response_text = "Log receiver set to this channel."
+            response_text = self._set_log_receiver_global('slack', channel_id)
         elif command == '/stop_log_here':
             self.log_receiver = None
-            if self.agent.chat.log_channel == 'slack':
-                self.agent.chat.log_channel = None
-            response_text = "Log receiver cleared."
+            response_text = self._clear_log_receiver_global()
         elif command == '/report_here':
             self.report_receiver = channel_id
-            self.agent.chat.report_channel = 'slack'
-            response_text = "Report receiver set to this channel."
+            response_text = self._set_report_receiver_global('slack', channel_id)
         elif command == '/stop_report_here':
             self.report_receiver = None
-            if self.agent.chat.report_channel == 'slack':
-                self.agent.chat.report_channel = None
-            response_text = "Report receiver cleared."
+            response_text = self._clear_report_receiver_global()
 
         if response_text and self._web_client:
             try:
@@ -326,7 +330,7 @@ class Slack_Client(Chat_Client):
             self.send_message(content, receiver=sender)
 
     def send_to_org(self, message, subject="General"):
-        """Send a message to the organization manager."""
+        """Send a message to the manager."""
         if self.org_manager_user_id:
             self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
 
