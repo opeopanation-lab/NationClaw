@@ -209,6 +209,44 @@ class Chat_Client(UniInterface):
     def _ensure_report_receiver_global(self, channel, receiver):
         return self.agent.chat.ensure_report_receiver(channel, receiver)
 
+    def _available_system_commands_text(self):
+        return (
+            "/log_here - Set this chat as log receiver\n"
+            "/stop_log_here - Stop sending logs to this chat\n"
+            "/report_here - Set this chat as report receiver\n"
+            "/stop_report_here - Stop sending reports to this chat"
+        )
+
+    def _history_system_messages(self):
+        return {
+            self._receiver_status_text('log', True),
+            self._receiver_status_text('log', False),
+            self._receiver_status_text('report', True),
+            self._receiver_status_text('report', False),
+            self._org_manager_status_text(),
+            self._available_system_commands_text(),
+        }
+
+    def _should_skip_history(self, content):
+        if content is None:
+            return True
+
+        text = str(content).strip()
+        if not text:
+            return True
+
+        if text in self._history_system_messages():
+            return True
+
+        command_prefixes = (
+            '/log_here',
+            '/stop_log_here',
+            '/report_here',
+            '/stop_report_here',
+            '/help',
+        )
+        return any(text.startswith(prefix) for prefix in command_prefixes)
+
     def _set_org_manager_if_missing(self, local_attr_name, config_attr_name, sender):
         """Bind the first valid sender as org_manager when it is not configured."""
         if not sender:

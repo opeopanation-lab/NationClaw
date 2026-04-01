@@ -343,6 +343,7 @@ class Telegram_Client(Chat_Client):
         logger.info("Report receiver cleared")
         await update.message.reply_text(self._clear_report_receiver_global())
 
+
     async def _on_message(self, update, context):
         """Handle incoming messages (text, photos, voice, documents)."""
         if not update.message or not update.effective_user:
@@ -582,6 +583,8 @@ class Telegram_Client(Chat_Client):
 
     def _append_history(self, chat_id, sender, content):
         """Append one message to in-memory chat history."""
+        if self._should_skip_history(content):
+            return
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         with self._history_lock:
             self._chat_history[str(chat_id)].append((str(sender), str(content), timestamp))

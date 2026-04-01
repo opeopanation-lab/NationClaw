@@ -68,6 +68,7 @@ MobileClaw 需要两个模型才能工作。一个用于通用任务控制（规
 custom_fm_url: "https://api.openai.com/v1/chat/completions"
 custom_fm_key: "sk-xxx"
 custom_fm_name: "gpt-5.2-chat"
+tavily_api_key: "tvly-xxx"  # 可选，用于启用 Tavily 联网搜索
 ```
 
 ## 聊天应用配置

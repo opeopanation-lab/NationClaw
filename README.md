@@ -68,6 +68,7 @@ For example, the following lines in `config.yaml` set the foundation model to `g
 custom_fm_url: "https://api.openai.com/v1/chat/completions"
 custom_fm_key: "sk-xxx"
 custom_fm_name: "gpt-5.2-chat"
+tavily_api_key: "tvly-xxx"  # optional, enables Tavily web search
 ```
 
 ## Chat App Configuration

@@ -35,6 +35,12 @@ class WebsocketController(DeviceControllerBase):
     def __str__(self) -> str:
         return f"手机设备: {self.device_name}"
 
+    @staticmethod
+    def _chunk_text_for_adb(text: str, max_chunk_len: int = 2) -> list[str]:
+        if max_chunk_len <= 0:
+            return [text]
+        return [text[i:i + max_chunk_len] for i in range(0, len(text), max_chunk_len)] or [""]
+
     def _resolve_device_serial_id(self) -> str:
         """
         解析设备序列号
@@ -799,19 +805,19 @@ Note: Be conservative - only return a match if you're confident the user meant t
                 # 如果没有指定起始坐标，使用屏幕中心
                 start_xy = (self.width // 2, self.height // 2)
 
-            # 根据方向计算结束坐标（滑动 1/3 屏幕距离）
+            # 根据方向计算结束坐标（从 start_xy 朝指定方向滑动）
             if direction == 'up':
                 distance = self.height // 3
-                end_xy = (start_xy[0], start_xy[1] + distance)
+                end_xy = (start_xy[0], start_xy[1] - distance)
             elif direction == 'down':
                 distance = self.height // 3
-                end_xy = (start_xy[0], start_xy[1] - distance)
+                end_xy = (start_xy[0], start_xy[1] + distance)
             elif direction == 'left':
                 distance = self.width // 2
-                end_xy = (start_xy[0] + distance, start_xy[1])
+                end_xy = (start_xy[0] - distance, start_xy[1])
             elif direction == 'right':
                 distance = self.width // 2
-                end_xy = (start_xy[0] - distance, start_xy[1])
+                end_xy = (start_xy[0] + distance, start_xy[1])
             else:
                 logger.error(f"不支持的滚动方向: {direction}")
                 return False
@@ -1105,15 +1111,14 @@ Note: Be conservative - only return a match if you're confident the user meant t
 
             for idx, line in enumerate(lines):
                 if line:
-                    # 先对空格做 adb 的 %s 转义
-                    line_for_adb = line.replace(' ', '%s')
-                    # 转义双引号和单引号，避免被 shell 误解析
-                    escaped_text = line_for_adb.replace('"', '\\"').replace("'", "\\'")
-
-                    subprocess.run(
-                        ["adb", "-s", self.device_serial_id, "shell", "input", "text", escaped_text],
-                        check=True
-                    )
+                    for chunk in self._chunk_text_for_adb(line):
+                        line_for_adb = chunk.replace(' ', '%s')
+                        escaped_text = line_for_adb.replace('"', '\\"').replace("'", "\\'")
+                        subprocess.run(
+                            ["adb", "-s", self.device_serial_id, "shell", "input", "text", escaped_text],
+                            check=True
+                        )
+                        time.sleep(0.05)
 
                 # 如果不是最后一行，说明原始文本中存在换行符，补一个 Enter
                 if idx < len(lines) - 1:
@@ -1121,6 +1126,7 @@ Note: Be conservative - only return a match if you're confident the user meant t
                         ["adb", "-s", self.device_serial_id, "shell", "input", "keyevent", "66"],
                         check=True
                     )
+                    time.sleep(0.05)
 
             logger.debug(f"使用 adb 成功输入文本: {repr(text_str)}")
             return True
@@ -1293,63 +1299,37 @@ Note: Be conservative - only return a match if you're confident the user meant t
         Returns:
             PIL.Image: 截图图像
         """
-        while self.agent._enabled:
+        max_attempts = 3
+        last_error = None
+
+        for attempt in range(1, max_attempts + 1):
+            if not self.agent._enabled:
+                raise RuntimeError("Agent stopped while taking screenshot")
+
             if self.config.prefer_phone_action_type == 'websocket':
-                # WebSocket 模式：仅使用 WebSocket 截图
                 try:
                     screenshot_image = self.take_screenshot_websocket()
-                    logger.debug("使用 WebSocket 方式截图成功")
                     return screenshot_image
                 except Exception as websocket_error:
-                    logger.info(f"📷 获取界面截图失败，可能是当前设备未连接，或者当前设备处于隐私保护界面，无法截图，请检查设备连接状态并重试")
-                    logger.debug(f"WebSocket截图失败: {str(websocket_error)}")
-                    
-                    # 请求用户手动接管
-                    try:
-                        task_language = getattr(self.agent, 'task_language', 'zh')
-                        if task_language == 'en':
-                            message = f'Failed to capture screenshot from device "{self.device_name}". The device may be disconnected or in a privacy protection screen. Please manually handle it and click "Takeover Ended" when done.'
-                        else:
-                            message = f'获取设备 "{self.device_name}" 的界面截图失败，可能是当前设备未连接，或者当前设备处于隐私保护界面，无法截图，请您手动进行处理，处理完成后点击"接管结束"按钮'
-                        
-                        logger.info(f"⚠️ {message}")
-                        self.agent.user.request_manual_takeover(message, timeout=30)
-                    except Exception as takeover_error:
-                        logger.debug(f"请求手动接管失败: {str(takeover_error)}")
-                    
-                    # 接管结束后，继续循环重试截图
+                    last_error = websocket_error
+                    logger.info(f"📷 Failed to take screenshot with websocket ({attempt}/{max_attempts}): {str(websocket_error)}")
             else:
-                # ADB 模式：优先 ADB，失败时尝试 WebSocket
                 try:
                     screenshot_image = self.take_screenshot_adb()
-                    logger.debug("使用 ADB 方式截图成功")
                     return screenshot_image
                 except Exception as adb_error:
-                    logger.debug(f"ADB截图失败: {str(adb_error)}, 尝试WebSocket方式")
-                    
+                    logger.info(f"📷 Failed to take screenshot with adb ({attempt}/{max_attempts}): {str(adb_error)}")
                     try:
                         screenshot_image = self.take_screenshot_websocket()
-                        logger.debug("使用 WebSocket 方式截图成功（回退方案）")
                         return screenshot_image
                     except Exception as websocket_error:
-                        logger.info(f"📷 获取界面截图失败，可能是当前设备未连接，或者当前设备处于隐私保护界面，无法截图，请检查设备连接状态并重试")
-                        logger.debug(f"ADB截图失败: {str(adb_error)}")
-                        logger.debug(f"WebSocket截图失败: {str(websocket_error)}")
-                        
-                        # 请求用户手动接管
-                        try:
-                            task_language = getattr(self.agent, 'task_language', 'zh')
-                            if task_language == 'en':
-                                message = f'Failed to capture screenshot from device "{self.device_name}". The device may be disconnected or in a privacy protection screen. Please manually handle it and click "Takeover Ended" when done.'
-                            else:
-                                message = f'获取设备 "{self.device_name}" 的界面截图失败，可能是当前设备未连接，或者当前设备处于隐私保护界面，无法截图，请您手动进行处理，处理完成后点击"接管结束"按钮'
-                            
-                            logger.info(f"⚠️ {message}")
-                            self.agent.user.request_manual_takeover(message, timeout=30)
-                        except Exception as takeover_error:
-                            logger.debug(f"请求手动接管失败: {str(takeover_error)}")
-                        
-                        # 接管结束后，继续循环重试截图
+                        last_error = websocket_error
+                        logger.info(f"📷 Failed to take screenshot with websocket (fallback) ({attempt}/{max_attempts}): {str(websocket_error)}")
+
+            if attempt < max_attempts:
+                time.sleep(0.5)
+
+        raise RuntimeError(f'Failed to capture screenshot: {last_error}. Pelease check whether the device is connected or in private mode.')
 
     def start_screen_record(self) -> bool:
         res = self._send_command('start_screen_record')

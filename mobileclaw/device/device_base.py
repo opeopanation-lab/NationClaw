@@ -45,7 +45,7 @@ class DeviceControllerBase(UniInterface):
     def __str__(self) -> str:
         return f"Device Interface: {self.device_name}"
 
-    def execute_task(self, task: str, max_steps: int = 15, keep_recent_images: int = 3):
+    def execute_task(self, task: str, max_steps: int = 6, keep_recent_images: int = 3):
         """
         Execute a device control task using iterative LLM-generated Python code.
 
@@ -269,6 +269,10 @@ class DeviceControllerBase(UniInterface):
                 """Type text content"""
                 return self._device.view_set_text(content)
 
+            def type(self, content):
+                """Type text into the active input field"""
+                return self._device.view_set_text(content)
+
             def enter(self):
                 """Press Enter key"""
                 return self._device.enter()
@@ -283,6 +287,12 @@ class DeviceControllerBase(UniInterface):
 
             def drag(self, start_xy, end_xy):
                 """Drag from start_xy to end_xy"""
+                scaled_x1, scaled_y1 = self._device._scale_coordinates_if_needed(start_xy[0], start_xy[1])
+                scaled_x2, scaled_y2 = self._device._scale_coordinates_if_needed(end_xy[0], end_xy[1])
+                return self._device.drag((scaled_x1, scaled_y1), (scaled_x2, scaled_y2))
+
+            def swipe(self, start_xy, end_xy):
+                """Swipe from start_xy to end_xy"""
                 scaled_x1, scaled_y1 = self._device._scale_coordinates_if_needed(start_xy[0], start_xy[1])
                 scaled_x2, scaled_y2 = self._device._scale_coordinates_if_needed(end_xy[0], end_xy[1])
                 return self._device.drag((scaled_x1, scaled_y1), (scaled_x2, scaled_y2))

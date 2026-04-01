@@ -231,10 +231,7 @@ class Zulip_Client(Chat_Client):
                 response_text = (
                     f"❓ Unknown command: {command}\n\n"
                     "Available commands:\n"
-                    "/log_here - Set this chat as log receiver\n"
-                    "/stop_log_here - Stop sending logs to this chat\n"
-                    "/report_here - Set this chat as report receiver\n"
-                    "/stop_report_here - Stop sending reports to this chat"
+                    f"{self._available_system_commands_text()}"
                 )
 
             # Send response as reply

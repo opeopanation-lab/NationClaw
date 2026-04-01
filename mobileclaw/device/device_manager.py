@@ -223,7 +223,7 @@ class DeviceManager(UniInterface):
             if canonical_type == 'browser':
                 description = f"Browser"
             elif canonical_type == 'phone':
-                description = f"Phone"
+                description = f"Smartphone"
             elif canonical_type == 'computer':
                 description = f"Computer"
             else:

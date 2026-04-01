@@ -430,19 +430,19 @@ class BrowserDeviceController(DeviceControllerBase):
                 # 如果没有指定起始坐标，使用屏幕中心
                 start_xy = (width // 2, height // 2)
 
-            # 根据方向计算结束坐标（滑动 1/3 屏幕距离）
+            # 根据方向计算结束坐标（从 start_xy 朝指定方向滑动）
             if direction == 'up':
                 distance = height // 3
-                end_xy = (start_xy[0], start_xy[1] + distance)
+                end_xy = (start_xy[0], start_xy[1] - distance)
             elif direction == 'down':
                 distance = height // 3
-                end_xy = (start_xy[0], start_xy[1] - distance)
+                end_xy = (start_xy[0], start_xy[1] + distance)
             elif direction == 'left':
                 distance = width // 3
-                end_xy = (start_xy[0] + distance, start_xy[1])
+                end_xy = (start_xy[0] - distance, start_xy[1])
             elif direction == 'right':
                 distance = width // 3
-                end_xy = (start_xy[0] - distance, start_xy[1])
+                end_xy = (start_xy[0] + distance, start_xy[1])
             else:
                 logger.error(f"不支持的滚动方向: {direction}")
                 raise ValueError(f"Unsupported scroll direction: {direction}")

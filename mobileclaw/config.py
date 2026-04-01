@@ -40,10 +40,10 @@ class AgentConfig:
     prefer_phone_action_type: str = field(default='websocket', metadata={"help": "Prefer phone input type."})
     no_gui_mode: bool = field(default=False, metadata={"help": "Disable GUI/device actions and run only local sandbox tasks."})
 
-    use_wisewk_service: bool = field(default=False, metadata={"help": "Whether to use Wisewk"})
-    wisewk_fm_name: str = field(default='wisewk_fm', metadata={"help": "Model name of the foundation model."})
-    wisewk_gui_vlm_name: str = field(default='wisewk_gui', metadata={"help": "Model name of the GUI VLM."})
-    wisewk_url: Optional[str] = field(default='https://api.wisewk.com/v1/chat/completions', metadata={"help": "API URL for Wisewk."})
+    use_wisewk_service: bool = field(default=True, metadata={"help": "Whether to use Wisewk"})
+    wisewk_fm_name: str = field(default='wisewk-fm', metadata={"help": "Model name of the foundation model."})
+    wisewk_gui_vlm_name: str = field(default='wisewk-gui', metadata={"help": "Model name of the GUI VLM."})
+    wisewk_url: Optional[str] = field(default='https://wisewk.com/v1/chat/completions/', metadata={"help": "API URL for Wisewk."})
     wisewk_key: Optional[str] = field(default=None, metadata={"help": "API key for Wisewk."})
 
     use_custom_fm: bool = field(default=True, metadata={"help": "Whether to use Custom Foundation Model."})
@@ -57,6 +57,10 @@ class AgentConfig:
     custom_gui_vlm_name: Optional[str] = field(default=None, metadata={"help": "Model name for Custom GUI Model."})
     gui_coordinate_scale_mode: str = field(default='auto', metadata={"help": "How to restore GUI model-returned coordinates. Supports 'auto', 'never', or 'scale_xxx' where xxx is the model coordinate range (e.g. scale_1000, scale_1)."})
     gui_max_screenshot_width: int = field(default=2000, metadata={"help": "Maximum width/height of screenshots sent to GUI models. Larger screenshots will be resized so the longer side is at most this value."})
+    tavily_api_url: Optional[str] = field(default='https://api.tavily.com/search', metadata={"help": "API URL for Tavily search."})
+    tavily_api_key: Optional[str] = field(default=None, metadata={"help": "API key for Tavily search."})
+    tavily_search_max_results: int = field(default=5, metadata={"help": "Default max number of Tavily search results."})
+    tavily_search_timeout: int = field(default=30, metadata={"help": "Timeout in seconds for Tavily search requests."})
 
     log_level: Optional[int] = field(default=logging.DEBUG, metadata={"help": "Logging level"})
 

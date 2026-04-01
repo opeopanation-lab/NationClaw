@@ -216,10 +216,7 @@ class QQ_Client(Chat_Client):
                 response_text = (
                     f"❓ Unknown command: {command}\n\n"
                     "Available commands:\n"
-                    "/log_here - Set as log receiver\n"
-                    "/stop_log_here - Stop receiving logs\n"
-                    "/report_here - Set as report receiver\n"
-                    "/stop_report_here - Stop receiving reports"
+                    f"{self._available_system_commands_text()}"
                 )
 
             # Send response

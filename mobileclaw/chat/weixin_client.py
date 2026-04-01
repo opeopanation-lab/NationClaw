@@ -256,11 +256,13 @@ class Weixin_Client(Chat_Client):
         if not from_user_id:
             return
 
+        group_id = message.get('group_id')
+        receiver_key = f'group:{group_id}' if group_id else from_user_id
+        self._remember_route(receiver_key, message)
+
         org_manager_set = self._set_org_manager_if_missing(from_user_id)
         if org_manager_set:
             self.send_message(self._org_manager_status_text(), receiver=from_user_id)
-        group_id = message.get('group_id')
-        receiver_key = f'group:{group_id}' if group_id else from_user_id
         content = self._extract_message_content(message)
         if not content:
             logger.debug('Skipping unsupported Weixin message without text content')
@@ -269,8 +271,6 @@ class Weixin_Client(Chat_Client):
             return
         if not self._is_command_message(content) and self._ensure_report_receiver_global('weixin', receiver_key):
             self.send_message(self._receiver_status_text('report', True), receiver=receiver_key)
-
-        self._remember_route(receiver_key, message)
         history_messages = self.get_history_messages(receiver_key)
         history = "\n".join([f'[{m[2]}] {m[0]}: {m[1]}' for m in history_messages])
         sender_name = receiver_key
@@ -523,7 +523,6 @@ class Weixin_Client(Chat_Client):
         elif command == '/stop_report_here':
             self.report_receiver = None
             response_text = self._clear_report_receiver_global()
-
         if response_text:
             self.send_message(response_text, receiver=receiver_key)
 
@@ -558,32 +557,41 @@ class Weixin_Client(Chat_Client):
             logger.error(err)
             raise RuntimeError(err)
 
-        item_list = self._build_outgoing_item_list(message, route)
-        payload = {
-            'msg': {
-                'from_user_id': '',
-                'to_user_id': route['receiver_key'],
-                'client_id': self._generate_client_id(),
-                'message_type': 2,
-                'message_state': 2,
-                'context_token': route['context_token'],
-                'item_list': item_list,
-            },
-            'base_info': {'channel_version': WEIXIN_CHANNEL_VERSION},
-        }
+        item_batches = self._build_outgoing_item_batches(message, route)
+        if not item_batches:
+            return None
 
         try:
             with self._send_lock:
-                result = self._api_post(
-                    'ilink/bot/sendmessage',
-                    payload,
-                    timeout=30,
-                    session=self._send_session,
-                )
-            logger.info('Weixin sendmessage response', receiver=receiver, response=result)
-            new_context_token = self._extract_response_context_token(result)
-            if new_context_token:
-                self._update_route_context_token(receiver, new_context_token)
+                for item_list in item_batches:
+                    route = self._resolve_route(receiver)
+                    if not route:
+                        raise RuntimeError(f'send_message failed. route unavailable for {receiver}')
+                    if not route.get('context_token'):
+                        raise RuntimeError(f'send_message failed. context_token unavailable for {receiver}')
+
+                    payload = {
+                        'msg': {
+                            'from_user_id': '',
+                            'to_user_id': route['receiver_key'],
+                            'client_id': self._generate_client_id(),
+                            'message_type': 2,
+                            'message_state': 2,
+                            'context_token': route['context_token'],
+                            'item_list': item_list,
+                        },
+                        'base_info': {'channel_version': WEIXIN_CHANNEL_VERSION},
+                    }
+                    result = self._api_post(
+                        'ilink/bot/sendmessage',
+                        payload,
+                        timeout=30,
+                        session=self._send_session,
+                    )
+                    logger.info('Weixin sendmessage response', receiver=receiver, response=result)
+                    new_context_token = self._extract_response_context_token(result)
+                    if new_context_token:
+                        self._update_route_context_token(receiver, new_context_token)
             self._append_history(route['receiver_key'], 'assistant', self._message_to_plain_text(message))
         except Exception as e:
             logger.exception(f'Error sending Weixin message: {e}')
@@ -602,6 +610,8 @@ class Weixin_Client(Chat_Client):
         return history[-max_previous_messages:]
 
     def _append_history(self, receiver_key, sender, content):
+        if self._should_skip_history(content):
+            return
         timestamp = time.strftime('%Y-%m-%d %H:%M:%S')
         with self._history_lock:
             self._history[str(receiver_key)].append((str(sender), str(content), timestamp))
@@ -609,23 +619,31 @@ class Weixin_Client(Chat_Client):
     def _generate_client_id(self):
         return f'mobileclaw-weixin:{int(time.time() * 1000)}-{os.urandom(4).hex()}'
 
-    def _build_outgoing_item_list(self, message, route):
-        item_list = []
+    def _build_outgoing_item_batches(self, message, route):
+        batches = []
+        text_buffer = []
+
+        def flush_text_buffer():
+            if not text_buffer:
+                return
+            batches.append([{
+                'type': WEIXIN_MSG_ITEM_TEXT,
+                'text_item': {'text': '\n'.join(text_buffer)},
+            }])
+            text_buffer.clear()
+
         for item in self._normalize_outgoing_message(message):
             if item['kind'] == 'text':
-                item_list.append({
-                    'type': WEIXIN_MSG_ITEM_TEXT,
-                    'text_item': {'text': item['text']},
-                })
+                text = item['text']
+                if text:
+                    text_buffer.append(text)
                 continue
 
             if item['message_type'] not in ('image', 'file'):
-                item_list.append({
-                    'type': WEIXIN_MSG_ITEM_TEXT,
-                    'text_item': {'text': f'[{item["message_type"]}: {item["rel_path"]}]'},
-                })
+                text_buffer.append(f'[{item["message_type"]}: {item["rel_path"]}]')
                 continue
 
+            flush_text_buffer()
             upload_media_type = WEIXIN_MEDIA_TYPE_IMAGE if item['message_type'] == 'image' else WEIXIN_MEDIA_TYPE_FILE
             upload_data = self._prepare_weixin_upload(item, route, upload_media_type)
             if item['message_type'] == 'image':
@@ -640,20 +658,21 @@ class Weixin_Client(Chat_Client):
                         'thumb_width': upload_data.get('thumb_width'),
                         'thumb_height': upload_data.get('thumb_height'),
                     })
-                item_list.append({
+                batches.append([{
                     'type': WEIXIN_MSG_ITEM_IMAGE,
                     'image_item': image_item,
-                })
+                }])
             else:
-                item_list.append({
+                batches.append([{
                     'type': WEIXIN_MSG_ITEM_FILE,
                     'file_item': {
                         'media': upload_data['media'],
                         'file_name': item['name'],
                         'len': str(os.path.getsize(item['abs_path'])),
                     }
-                })
-        return item_list
+                }])
+        flush_text_buffer()
+        return batches
 
     def _prepare_weixin_upload(self, item, route, media_type):
         raw_bytes = Path(item['abs_path']).read_bytes()
@@ -663,7 +682,7 @@ class Weixin_Client(Chat_Client):
         filekey = os.urandom(16).hex()
         raw_md5 = hashlib.md5(raw_bytes).hexdigest()
         thumb_info = None
-        if media_type == WEIXIN_MSG_ITEM_IMAGE:
+        if media_type == WEIXIN_MEDIA_TYPE_IMAGE:
             thumb_info = self._build_image_thumbnail(item['abs_path'])
         upload_resp = self._request_weixin_upload_url(
             to_user_id=route.get('to_user_id') or route.get('receiver_key'),

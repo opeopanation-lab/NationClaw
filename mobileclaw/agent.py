@@ -141,7 +141,7 @@ class AutoAgent:
 
         try:
             while not self._shutdown_requested():
-                self.execute_task('Complete pending tasks or do your routine work.')
+                self.execute_task('Complete pending tasks or do routine work')
                 if self._shutdown_requested():
                     break
                 self._adaptive_sleep()
@@ -278,6 +278,12 @@ class AutoAgent:
 
         return agent_info
 
+    def get_available_files_info(self):
+        """Get a tree index of available files under the agent working directory."""
+        if hasattr(self, 'file') and self.file:
+            return self.file.get_agent_dir_tree()
+        return "(File interface not initialized)"
+
     def get_current_task_info(self):
         """
         Get information about the current ongoing task.
@@ -323,6 +329,7 @@ class AutoAgent:
 
         # Get available skills
         available_skills = self.file.list_skills()
+        available_files = self.get_available_files_info()
 
         # Initialize execution state
         actions_and_results = actions_and_results
@@ -367,6 +374,7 @@ class AutoAgent:
                     'available_devices': available_devices,
                     'available_models': available_models,
                     'available_skills': available_skills,
+                    'available_files': available_files,
                     'recursion_depth': _recursion_depth,
                     'media_content_parts': media_content_parts,
                 }
@@ -852,26 +860,31 @@ Task: {current_task}
             logger.error(f"Error executing instruction on device: {e}")
             return [f"Error: {str(e)}"], []
 
-    def query_model(self, params, model_name=None):
+    def query_model(self, params, model_name=None, with_search=False):
         """
         Query the foundation model.
 
         Args:
             params: List of query parameters (text, image, file_path, etc.)
+                    or a dict containing 'query' and optional extra options
             model_name: Specifies the preferred model to use in this query
+            with_search: Whether to search the web before querying the model
 
         Returns:
             list: Model response as a list of text and images
         """
+        request_params = dict(params) if isinstance(params, dict) else {'query': params}
+        query_params = request_params.get('query', [])
+
         # Convert params to appropriate format for fm interface
-        if isinstance(params, str):
-            params = [params]
+        if isinstance(query_params, str):
+            query_params = [query_params]
 
         # Load file paths in params
         IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.tiff'}
         TEXT_EXTENSIONS = {'.md', '.txt', '.csv', '.json', '.xml', '.html', '.yaml', '.yml', '.log'}
         resolved_params = []
-        for item in params:
+        for item in query_params:
             if isinstance(item, str) and not item.startswith(('http://', 'https://')):
                 path = item if os.path.isabs(item) else os.path.join(self.file.agent_dir, item)
                 if os.path.isfile(path):
@@ -894,10 +907,11 @@ Task: {current_task}
 
         try:
             # Use the query_model function from function_hub_local
-            response = self.fm.call_func('query_model', {
-                'query': resolved_params,
-                'model_name': model_name or 'default'
-            })
+            request_payload = dict(request_params)
+            request_payload['query'] = resolved_params
+            request_payload['model_name'] = request_payload.get('model_name') or model_name or 'default'
+            request_payload['with_search'] = request_payload.get('with_search', with_search)
+            response = self.fm.call_func('query_model', request_payload)
 
             if response is None:
                 return ["Error: No response from model"]
@@ -1042,8 +1056,13 @@ Task: {current_task}
             def _capture_text_result(self, api_name, result):
                 """Capture a text result, saving to temp file if too large."""
                 result_str = str(result)
-                if len(result_str) <= self.RESULT_MAX_INLINE_LEN:
-                    self._log_output(f"{api_name} returned:\n{result_str}")
+                formatted_result = result_str
+                block_wrapped_apis = {'file.read', 'file.search', 'query_model', 'file.parse_file', 'infer_from_last_trajectory', 'do_with_device'}
+                if api_name in block_wrapped_apis and result_str:
+                    formatted_result = f"```text\n{result_str}\n```"
+                should_inline_full = api_name == 'file.read'
+                if should_inline_full or len(result_str) <= self.RESULT_MAX_INLINE_LEN:
+                    self._log_output(f"{api_name} returned:\n{formatted_result}")
                 else:
                     # Save to temp file
                     try:
@@ -1052,16 +1071,27 @@ Task: {current_task}
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         filename = f"result_{api_name}_{timestamp}.md"
                         filepath = os.path.join(temp_dir, filename)
+                        stored_result = result_str
                         with open(filepath, 'w', encoding='utf-8') as f:
-                            f.write(result_str)
-                        brief = result_str[:self.RESULT_BRIEF_LEN]
+                            f.write(stored_result)
                         rel_path = os.path.relpath(filepath, self._agent.file.agent_dir)
+                        total_lines = stored_result.count('\n') + (1 if stored_result else 0)
+                        total_chars = len(stored_result)
+                        preview_end = max(0, min(total_lines, 200) - 1)
+                        preview = self._agent.file.read(rel_path, 0, preview_end)
+                        formatted_preview = preview
+                        if preview:
+                            formatted_preview = f"```text\n{preview}\n```"
                         self._log_output(
-                            f"{api_name} returned (full content saved to {rel_path}):\n{brief}..."
+                            f"{api_name} returned (content saved to {rel_path}; total lines: {total_lines}; total chars: {total_chars}):\n{formatted_preview}"
                         )
                     except Exception as e:
                         logger.warning(f"Failed to save result to temp file: {e}")
-                        self._log_output(f"{api_name} returned (truncated):\n{result_str[:self.RESULT_BRIEF_LEN]}...")
+                        brief = result_str[:self.RESULT_BRIEF_LEN]
+                        formatted_brief = brief
+                        if api_name in block_wrapped_apis and brief:
+                            formatted_brief = f"```text\n{brief}...\n```"
+                        self._log_output(f"{api_name} returned (truncated):\n{formatted_brief}")
 
             def _save_screenshot(self, screenshot, label='screenshot'):
                 """Save a screenshot to _temp/screenshots/ and append image tuple to actions_and_results."""
@@ -1123,9 +1153,9 @@ Task: {current_task}
                 self._capture_result('infer_from_last_trajectory', result)
                 return result
 
-            def query_model(self, params, model_name=None):
+            def query_model(self, params, model_name=None, with_search=False):
                 self._check_call_count()
-                result = self._agent.query_model(params, model_name)
+                result = self._agent.query_model(params, model_name, with_search=with_search)
                 self._capture_result('query_model', result)
                 return result
 

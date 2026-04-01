@@ -13,6 +13,7 @@ use_custom_gui_vlm: true
 custom_gui_vlm_url: ?
 custom_gui_vlm_key: ?
 custom_gui_vlm_name: ?
+tavily_api_key: ?  # optional Tavily search API key
 
 root_dir: (path to root dir)
 name: (name of your bot)
