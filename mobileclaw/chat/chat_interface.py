@@ -12,9 +12,9 @@ class Chat_Interface(UniInterface):
         self.chat_channels = agent.config.chat_channels.split(',')
         self.chat_clients = {}
         self.default_chat_channel = agent.config.default_chat_channel
-        # Global channel settings for logs and reports (set via commands)
-        self.log_channel = None  # Channel to use for send_to_log
-        self.report_channel = None  # Channel to use for send_message when receiver is None
+        self.verbose = bool(getattr(agent.config, 'chat_verbose', False))
+        self.log_receiver = None
+        self.report_receiver = None
 
     def __str__(self) -> str:
         return "Chat interface"
@@ -91,6 +91,35 @@ class Chat_Interface(UniInterface):
             raise Exception(f'Unknown channel: {channel}; Should be one of {self.chat_channels}')
         return self.chat_clients.get(channel)
 
+    def set_log_receiver(self, channel, receiver):
+        self.log_receiver = {
+            'channel': str(channel),
+            'receiver': receiver,
+        }
+
+    def clear_log_receiver(self):
+        self.log_receiver = None
+
+    def set_report_receiver(self, channel, receiver):
+        self.report_receiver = {
+            'channel': str(channel),
+            'receiver': receiver,
+        }
+
+    def clear_report_receiver(self):
+        self.report_receiver = None
+
+    def ensure_report_receiver(self, channel, receiver):
+        if self.report_receiver is not None:
+            return False
+        self.set_report_receiver(channel, receiver)
+        return True
+
+    def should_send_system_message(self, triggered_by_command=False):
+        if triggered_by_command:
+            return True
+        return self.verbose
+
     def send_reply(self, message, previous_message, channel=None):
         """
         Send a reply to a previous message.
@@ -104,36 +133,26 @@ class Chat_Interface(UniInterface):
         if client is not None and hasattr(client, 'send_reply'):
             client.send_reply(message, previous_message)
 
-    def send_to_org(self, message, subject="General", channel=None):
-        """
-        Send a message to the organization.
-
-        Args:
-            message: Message content to send
-            subject: Subject/topic for the message
-            channel: Channel to use (optional, defaults to default_chat_channel)
-        """
-        client = self._get_client(channel)
-        if client is not None and hasattr(client, 'send_to_org'):
-            client.send_to_org(message, subject)
-
-    def send_to_log(self, message, subject="Log", channel=None):
+    def send_to_log(self, message, channel=None):
         """
         Send a message to the agent's self-reporting stream.
 
         Args:
             message: Message content to send
-            subject: Subject/topic for the message
             channel: Channel to use (optional, defaults to log_channel or default_chat_channel)
         """
-        # Use log_channel if set and no explicit channel specified
-        if channel is None and self.log_channel is not None:
-            channel = self.log_channel
+        if channel is None:
+            if self.log_receiver is None:
+                return
+            channel = self.log_receiver['channel']
+            receiver = self.log_receiver['receiver']
+        else:
+            receiver = None
         client = self._get_client(channel)
-        if client is not None and hasattr(client, 'send_to_log'):
-            client.send_to_log(message, subject)
+        if client is not None and hasattr(client, 'send_message'):
+            client.send_message(message, receiver=receiver, _type='log')
 
-    def send_message(self, message, receiver=None, channel=None):
+    def send_message(self, message, receiver=None, channel=None, _type=None):
         """
         Send a message to the receiver.
 
@@ -142,9 +161,11 @@ class Chat_Interface(UniInterface):
             receiver: Name/id of the message receiver (can be a user or a group)
             channel: Channel to use (optional, defaults to report_channel or default_chat_channel)
         """
-        # Use report_channel if set, no explicit channel specified, and no receiver specified
-        if channel is None and receiver is None and self.report_channel is not None:
-            channel = self.report_channel
+        if channel is None and receiver is None:
+            if self.report_receiver is None:
+                return
+            channel = self.report_receiver['channel']
+            receiver = self.report_receiver['receiver']
         client = self._get_client(channel)
         if client is not None and hasattr(client, 'send_message'):
-            client.send_message(message, receiver)
+            client.send_message(message, receiver, _type=_type)

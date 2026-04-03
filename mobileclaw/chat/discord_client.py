@@ -188,11 +188,13 @@ class Discord_Client(Chat_Client):
         # Store channel_id for replies
         self._channel_ids[sender_id] = channel_id
 
-        self._set_org_manager_if_missing(
+        org_manager_set = self._set_org_manager_if_missing(
             'org_manager_user_id',
             'chat_discord_org_manager',
             sender_id,
         )
+        if org_manager_set and self._should_send_system_message():
+            await self._send_to_channel(self._org_manager_status_text(), channel_id)
 
         # Build content from text and attachments
         content_parts = [content] if content else []
@@ -208,14 +210,15 @@ class Discord_Client(Chat_Client):
                 content_parts.append(f"[attachment: {filename} - too large]")
                 continue
             try:
-                media_dir = Path.home() / ".mobileclaw" / "media"
-                media_dir.mkdir(parents=True, exist_ok=True)
-                file_path = media_dir / f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}"
                 resp = await self._http.get(url)
                 resp.raise_for_status()
-                file_path.write_bytes(resp.content)
+                file_path = self._save_incoming_media_bytes(
+                    'discord',
+                    f"{attachment.get('id', 'file')}_{filename.replace('/', '_')}",
+                    resp.content,
+                )
                 media_paths.append(str(file_path))
-                content_parts.append(f"[attachment: {file_path}]")
+                content_parts.append(self._format_incoming_attachment_ref('attachment', file_path))
             except Exception as e:
                 logger.warning(f"Failed to download Discord attachment: {e}")
                 content_parts.append(f"[attachment: {filename} - download failed]")
@@ -228,6 +231,12 @@ class Discord_Client(Chat_Client):
             return
         if not self._should_handle_incoming(sender_id, self.org_manager_user_id, logger=logger, channel='discord'):
             return
+        if (
+            not self._is_command_message(final_content)
+            and self._ensure_report_receiver_global('discord', channel_id)
+            and self._should_send_system_message()
+        ):
+            await self._send_to_channel(self._receiver_status_text('report', True), channel_id)
 
         # Call agent's message handler
         if hasattr(self.agent, 'handle_message'):
@@ -242,22 +251,16 @@ class Discord_Client(Chat_Client):
         """Handle bot commands from org_manager."""
         if command == '/log_here':
             self.log_receiver = channel_id
-            self.agent.chat.log_channel = 'discord'
-            await self._send_to_channel("Log receiver set to this channel.", channel_id)
+            await self._send_to_channel(self._set_log_receiver_global('discord', channel_id), channel_id)
         elif command == '/stop_log_here':
             self.log_receiver = None
-            if self.agent.chat.log_channel == 'discord':
-                self.agent.chat.log_channel = None
-            await self._send_to_channel("Log receiver cleared.", channel_id)
+            await self._send_to_channel(self._clear_log_receiver_global(), channel_id)
         elif command == '/report_here':
             self.report_receiver = channel_id
-            self.agent.chat.report_channel = 'discord'
-            await self._send_to_channel("Report receiver set to this channel.", channel_id)
+            await self._send_to_channel(self._set_report_receiver_global('discord', channel_id), channel_id)
         elif command == '/stop_report_here':
             self.report_receiver = None
-            if self.agent.chat.report_channel == 'discord':
-                self.agent.chat.report_channel = None
-            await self._send_to_channel("Report receiver cleared.", channel_id)
+            await self._send_to_channel(self._clear_report_receiver_global(), channel_id)
 
     async def _send_to_channel(self, text, channel_id):
         """Send a message to a Discord channel via REST API."""
@@ -277,7 +280,17 @@ class Discord_Client(Chat_Client):
             except Exception as e:
                 logger.error(f"Error sending Discord message: {e}")
 
-    def send_message(self, message, receiver=None, subject=None):
+    async def _send_attachment_to_channel(self, item, channel_id):
+        """Send an attachment to a Discord channel via REST API."""
+        if not self._http:
+            return
+        url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages"
+        headers = {"Authorization": f"Bot {self.agent.config.chat_discord_token}"}
+        with open(item['abs_path'], 'rb') as file_obj:
+            files = {"files[0]": (item['name'], file_obj, item['mime_type'])}
+            await self._http.post(url, headers=headers, files=files)
+
+    def send_message(self, message, receiver=None, _type=None):
         """Send a message to a user or channel."""
         if not self._http or not self._loop:
             logger.warning('Discord client not initialized')
@@ -302,15 +315,25 @@ class Discord_Client(Chat_Client):
             return
 
         try:
+            normalized_message = self._normalize_outgoing_message(message)
             if self._loop.is_running():
-                asyncio.run_coroutine_threadsafe(
-                    self._send_to_channel(str(message), channel_id),
-                    self._loop
-                ).result(timeout=10)
+                for item in normalized_message:
+                    coro = (
+                        self._send_to_channel(item['text'], channel_id)
+                        if item['kind'] == 'text'
+                        else self._send_attachment_to_channel(item, channel_id)
+                    )
+                    asyncio.run_coroutine_threadsafe(coro, self._loop).result(timeout=10)
             else:
                 loop = asyncio.new_event_loop()
                 try:
-                    loop.run_until_complete(self._send_to_channel(str(message), channel_id))
+                    for item in normalized_message:
+                        coro = (
+                            self._send_to_channel(item['text'], channel_id)
+                            if item['kind'] == 'text'
+                            else self._send_attachment_to_channel(item, channel_id)
+                        )
+                        loop.run_until_complete(coro)
                 finally:
                     loop.close()
         except Exception as e:
@@ -321,29 +344,6 @@ class Discord_Client(Chat_Client):
         sender = getattr(previous_message, 'sender', None)
         if sender:
             self.send_message(content, receiver=sender)
-
-    def send_to_org(self, message, subject="General"):
-        """Send a message to the organization manager."""
-        if self.org_manager_user_id:
-            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
-
-    def send_to_log(self, message, subject="Log"):
-        """Send a message to the log receiver."""
-        if self._manager_only_enabled() and self.org_manager_user_id:
-            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
-            return
-        if self.log_receiver is None:
-            return
-        if not self._http or not self._loop:
-            return
-        try:
-            if self._loop.is_running():
-                asyncio.run_coroutine_threadsafe(
-                    self._send_to_channel(str(message), self.log_receiver),
-                    self._loop
-                ).result(timeout=10)
-        except Exception as e:
-            logger.exception(f'Error sending to log receiver: {e}')
 
     def get_history_messages(self, msg, max_previous_messages=10):
         """Get message history. Returns empty list."""

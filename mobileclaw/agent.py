@@ -125,9 +125,9 @@ class AutoAgent:
     def _adaptive_sleep(self):
         """Adaptive sleep based on idle task count.
         Sleep time increases exponentially with consecutive idle tasks,
-        up to a maximum of 10 minutes (600 seconds).
+        up to a maximum of 30 minutes (1800 seconds).
         """
-        sleep_time = min(2 ** self._idle_task_count, 600)
+        sleep_time = min(3 ** self._idle_task_count, 1800)
         self._sleep(sleep_time)
 
     def serve(self):
@@ -141,7 +141,7 @@ class AutoAgent:
 
         try:
             while not self._shutdown_requested():
-                self.execute_task('Complete pending tasks or do your routine work.')
+                self.execute_task('Complete pending tasks or do routine work')
                 if self._shutdown_requested():
                     break
                 self._adaptive_sleep()
@@ -263,8 +263,7 @@ class AutoAgent:
         agent_info = f"""
 - Current Time: {current_time}
 - Agent Name: {self.name}
-- Agent Permission: {self.permission}
-- Agent Profile ({profile_path_rel}):
+- Profile Defined By Manager ({profile_path_rel}):
 ```
 {profile_content}
 ```
@@ -278,6 +277,12 @@ class AutoAgent:
 ```"""
 
         return agent_info
+
+    def get_available_files_info(self):
+        """Get a tree index of available files under the agent working directory."""
+        if hasattr(self, 'file') and self.file:
+            return self.file.get_agent_dir_tree()
+        return "(File interface not initialized)"
 
     def get_current_task_info(self):
         """
@@ -305,9 +310,9 @@ class AutoAgent:
                   - 'conclude_task': Save task information to knowledge and memory files
         """
         # Prevent infinite recursion
-        if _recursion_depth >= 3:
+        if _recursion_depth >= 6:
             logger.warning(f"Maximum recursion depth reached for task: {task}")
-            return [f"Error: Maximum recursion depth (3) reached. Cannot execute subtask: {task}"]
+            return [f"Error: Maximum recursion depth (6) reached. Cannot execute subtask: {task}"]
 
         # Generate a random emoji as task tag
         task_emojis = ['🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🟤', '⚫', '⚪',
@@ -324,6 +329,7 @@ class AutoAgent:
 
         # Get available skills
         available_skills = self.file.list_skills()
+        available_files = self.get_available_files_info()
 
         # Initialize execution state
         actions_and_results = actions_and_results
@@ -368,6 +374,7 @@ class AutoAgent:
                     'available_devices': available_devices,
                     'available_models': available_models,
                     'available_skills': available_skills,
+                    'available_files': available_files,
                     'recursion_depth': _recursion_depth,
                     'media_content_parts': media_content_parts,
                 }
@@ -813,9 +820,9 @@ Task: {current_task}
         if getattr(self.config, 'use_wisewk_service', False):
             logger.info("✅ Using Wisewk service")
         if getattr(self.config, 'use_custom_fm', False):
-            logger.info("✅ Using custom FM model")
+            logger.info(f"✅ Using custom FM model: {self.config.custom_fm_name}")
         if getattr(self.config, 'use_custom_gui_vlm', False):
-            logger.info("✅ Using custom GUI-VLM model")
+            logger.info(f"✅ Using custom GUI-VLM model: {self.config.custom_gui_vlm_name}")
 
     def get_current_task_line(self):
         """Get the current line number being executed in the task."""
@@ -853,26 +860,31 @@ Task: {current_task}
             logger.error(f"Error executing instruction on device: {e}")
             return [f"Error: {str(e)}"], []
 
-    def query_model(self, params, model_name=None):
+    def query_model(self, params, model_name=None, with_search=False):
         """
         Query the foundation model.
 
         Args:
             params: List of query parameters (text, image, file_path, etc.)
+                    or a dict containing 'query' and optional extra options
             model_name: Specifies the preferred model to use in this query
+            with_search: Whether to search the web before querying the model
 
         Returns:
             list: Model response as a list of text and images
         """
+        request_params = dict(params) if isinstance(params, dict) else {'query': params}
+        query_params = request_params.get('query', [])
+
         # Convert params to appropriate format for fm interface
-        if isinstance(params, str):
-            params = [params]
+        if isinstance(query_params, str):
+            query_params = [query_params]
 
         # Load file paths in params
         IMAGE_EXTENSIONS = {'.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.tiff'}
         TEXT_EXTENSIONS = {'.md', '.txt', '.csv', '.json', '.xml', '.html', '.yaml', '.yml', '.log'}
         resolved_params = []
-        for item in params:
+        for item in query_params:
             if isinstance(item, str) and not item.startswith(('http://', 'https://')):
                 path = item if os.path.isabs(item) else os.path.join(self.file.agent_dir, item)
                 if os.path.isfile(path):
@@ -895,10 +907,11 @@ Task: {current_task}
 
         try:
             # Use the query_model function from function_hub_local
-            response = self.fm.call_func('query_model', {
-                'query': resolved_params,
-                'model_name': model_name or 'default'
-            })
+            request_payload = dict(request_params)
+            request_payload['query'] = resolved_params
+            request_payload['model_name'] = request_payload.get('model_name') or model_name or 'default'
+            request_payload['with_search'] = request_payload.get('with_search', with_search)
+            response = self.fm.call_func('query_model', request_payload)
 
             if response is None:
                 return ["Error: No response from model"]
@@ -965,6 +978,12 @@ Task: {current_task}
                 self._agent_api._capture_result('file.replace', result)
                 return result
 
+            def edit(self, file_path, edits):
+                self._check_and_count()
+                result = self._file.edit(file_path, edits)
+                self._agent_api._capture_result('file.edit', result)
+                return result
+
             def delete(self, file_path):
                 self._check_and_count()
                 result = self._file.delete(file_path)
@@ -975,18 +994,6 @@ Task: {current_task}
                 self._check_and_count()
                 result = self._file.remove_lines(file_path, line_start, line_end)
                 self._agent_api._capture_result('file.remove_lines', result)
-                return result
-
-            def parse_file(self, file_path):
-                self._check_and_count()
-                result = self._file.parse_file(file_path)
-                self._agent_api._capture_result('file.parse_file', result)
-                return result
-
-            def generate_file(self, file_path, requirement, materials):
-                self._check_and_count()
-                result = self._file.generate_file(file_path, requirement, materials)
-                self._agent_api._capture_result('file.generate_file', result)
                 return result
 
         class AgentAPI:
@@ -1043,8 +1050,13 @@ Task: {current_task}
             def _capture_text_result(self, api_name, result):
                 """Capture a text result, saving to temp file if too large."""
                 result_str = str(result)
-                if len(result_str) <= self.RESULT_MAX_INLINE_LEN:
-                    self._log_output(f"{api_name} returned:\n{result_str}")
+                formatted_result = result_str
+                block_wrapped_apis = {'file.read', 'file.search', 'file.edit', 'read_document', 'query_model', 'infer_from_last_trajectory', 'do_with_device'}
+                if api_name in block_wrapped_apis and result_str:
+                    formatted_result = f"```text\n{result_str}\n```"
+                should_inline_full = api_name == 'file.read'
+                if should_inline_full or len(result_str) <= self.RESULT_MAX_INLINE_LEN:
+                    self._log_output(f"{api_name} returned:\n{formatted_result}")
                 else:
                     # Save to temp file
                     try:
@@ -1053,16 +1065,27 @@ Task: {current_task}
                         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                         filename = f"result_{api_name}_{timestamp}.md"
                         filepath = os.path.join(temp_dir, filename)
+                        stored_result = result_str
                         with open(filepath, 'w', encoding='utf-8') as f:
-                            f.write(result_str)
-                        brief = result_str[:self.RESULT_BRIEF_LEN]
+                            f.write(stored_result)
                         rel_path = os.path.relpath(filepath, self._agent.file.agent_dir)
+                        total_lines = stored_result.count('\n') + (1 if stored_result else 0)
+                        total_chars = len(stored_result)
+                        preview_end = max(0, min(total_lines, 200) - 1)
+                        preview = self._agent.file.read(rel_path, 0, preview_end)
+                        formatted_preview = preview
+                        if preview:
+                            formatted_preview = f"```text\n{preview}\n```"
                         self._log_output(
-                            f"{api_name} returned (full content saved to {rel_path}):\n{brief}..."
+                            f"{api_name} returned (content saved to {rel_path}; total lines: {total_lines}; total chars: {total_chars}):\n{formatted_preview}"
                         )
                     except Exception as e:
                         logger.warning(f"Failed to save result to temp file: {e}")
-                        self._log_output(f"{api_name} returned (truncated):\n{result_str[:self.RESULT_BRIEF_LEN]}...")
+                        brief = result_str[:self.RESULT_BRIEF_LEN]
+                        formatted_brief = brief
+                        if api_name in block_wrapped_apis and brief:
+                            formatted_brief = f"```text\n{brief}...\n```"
+                        self._log_output(f"{api_name} returned (truncated):\n{formatted_brief}")
 
             def _save_screenshot(self, screenshot, label='screenshot'):
                 """Save a screenshot to _temp/screenshots/ and append image tuple to actions_and_results."""
@@ -1124,9 +1147,9 @@ Task: {current_task}
                 self._capture_result('infer_from_last_trajectory', result)
                 return result
 
-            def query_model(self, params, model_name=None):
+            def query_model(self, params, model_name=None, with_search=False):
                 self._check_call_count()
-                result = self._agent.query_model(params, model_name)
+                result = self._agent.query_model(params, model_name, with_search=with_search)
                 self._capture_result('query_model', result)
                 return result
 
@@ -1197,5 +1220,24 @@ Task: {current_task}
                 result_text = f'Image loaded: {rel_path}'
                 self._log_output(result_text)
                 self._log_output((rel_path, base64_str))
+
+            def read_document(self, document_path):
+                """Read a document file as markdown-like text and include it in the next step's context.
+
+                Args:
+                    document_path: Relative path (from agent dir) or absolute path to the document file.
+                """
+                self._check_call_count()
+                result = self._agent.file.read_document(document_path)
+                if isinstance(result, list):
+                    rel_path = document_path
+                    if os.path.isabs(document_path):
+                        rel_path = os.path.relpath(document_path, self._agent.file.agent_dir)
+                    result_text = f"Document loaded: {rel_path}"
+                    self._log_output(result_text)
+                    self._capture_result('read_document', result)
+                    return result
+                self._capture_result('read_document', result)
+                return result
 
         return AgentAPI(self, actions_and_results, recursion_depth, mode, task_tag, indent)

@@ -2,6 +2,7 @@
 The WhatsApp chat client implementation using Node.js bridge (via @whiskeysockets/baileys).
 """
 import asyncio
+import base64
 import json
 from threading import Thread
 import structlog
@@ -110,7 +111,11 @@ class WhatsApp_Client(Chat_Client):
             pn = data.get("pn", "")
             # New LID style
             sender = data.get("sender", "")
-            content = data.get("content", "")
+            content = data.get("content", "") or ""
+            media_type = data.get("media_type")
+            file_name = data.get("file_name") or "attachment"
+            file_data = data.get("file_data")
+            file_path = data.get("file_path")
 
             user_id = pn if pn else sender
             sender_id = user_id.split("@")[0] if "@" in user_id else user_id
@@ -118,11 +123,36 @@ class WhatsApp_Client(Chat_Client):
             # Store full jid for replies
             self._chat_ids[sender_id] = sender
 
-            self._set_org_manager_if_missing(
+            org_manager_set = self._set_org_manager_if_missing(
                 'org_manager_user_id',
                 'chat_whatsapp_org_manager',
                 sender_id,
             )
+            if org_manager_set and self._should_send_system_message():
+                await self._async_send(self._org_manager_status_text(), sender)
+
+            content_parts = [content] if content else []
+            if media_type:
+                saved_path = None
+                try:
+                    if file_data:
+                        saved_path = self._save_incoming_media_bytes(
+                            'whatsapp',
+                            file_name,
+                            base64.b64decode(file_data),
+                        )
+                    elif file_path:
+                        with open(file_path, 'rb') as file_obj:
+                            saved_path = self._save_incoming_media_bytes(
+                                'whatsapp',
+                                file_name,
+                                file_obj.read(),
+                            )
+                except Exception as e:
+                    logger.warning(f"Failed to persist WhatsApp media: {e}")
+                if saved_path:
+                    content_parts.append(self._format_incoming_attachment_ref(media_type, saved_path))
+            content = "\n".join([part for part in content_parts if part]).strip()
 
             # Handle commands
             if content.startswith('/') and sender_id == self.org_manager_user_id:
@@ -130,6 +160,12 @@ class WhatsApp_Client(Chat_Client):
                 return
             if not self._should_handle_incoming(sender_id, self.org_manager_user_id, logger=logger, channel='whatsapp'):
                 return
+            if (
+                not self._is_command_message(content)
+                and self._ensure_report_receiver_global('whatsapp', sender)
+                and self._should_send_system_message()
+            ):
+                await self._async_send(self._receiver_status_text('report', True), sender)
 
             # Call agent's message handler
             if hasattr(self.agent, 'handle_message'):
@@ -158,22 +194,16 @@ class WhatsApp_Client(Chat_Client):
         """Handle bot commands from org_manager."""
         if command == '/log_here':
             self.log_receiver = chat_id
-            self.agent.chat.log_channel = 'whatsapp'
-            await self._async_send("Log receiver set.", chat_id)
+            await self._async_send(self._set_log_receiver_global('whatsapp', chat_id), chat_id)
         elif command == '/stop_log_here':
             self.log_receiver = None
-            if self.agent.chat.log_channel == 'whatsapp':
-                self.agent.chat.log_channel = None
-            await self._async_send("Log receiver cleared.", chat_id)
+            await self._async_send(self._clear_log_receiver_global(), chat_id)
         elif command == '/report_here':
             self.report_receiver = chat_id
-            self.agent.chat.report_channel = 'whatsapp'
-            await self._async_send("Report receiver set.", chat_id)
+            await self._async_send(self._set_report_receiver_global('whatsapp', chat_id), chat_id)
         elif command == '/stop_report_here':
             self.report_receiver = None
-            if self.agent.chat.report_channel == 'whatsapp':
-                self.agent.chat.report_channel = None
-            await self._async_send("Report receiver cleared.", chat_id)
+            await self._async_send(self._clear_report_receiver_global(), chat_id)
 
     async def _async_send(self, text, chat_id):
         """Send a message through the WhatsApp bridge."""
@@ -190,7 +220,28 @@ class WhatsApp_Client(Chat_Client):
         except Exception as e:
             logger.error(f"Error sending WhatsApp message: {e}")
 
-    def send_message(self, message, receiver=None, subject=None):
+    async def _async_send_media(self, item, chat_id):
+        """Send media through the WhatsApp bridge."""
+        if not self._ws or not self._connected:
+            logger.warning("WhatsApp bridge not connected")
+            return
+        try:
+            with open(item['abs_path'], 'rb') as file_obj:
+                file_data = base64.b64encode(file_obj.read()).decode('utf-8')
+            payload = {
+                "type": "send_media",
+                "to": chat_id,
+                "media_type": item['message_type'],
+                "file_name": item['name'],
+                "mime_type": item['mime_type'],
+                "file_path": item['abs_path'],
+                "file_data": file_data,
+            }
+            await self._ws.send(json.dumps(payload))
+        except Exception as e:
+            logger.error(f"Error sending WhatsApp media: {e}")
+
+    def send_message(self, message, receiver=None, _type=None):
         """Send a message to a user."""
         if not self._ws or not self._connected:
             logger.warning('WhatsApp client not connected')
@@ -215,15 +266,25 @@ class WhatsApp_Client(Chat_Client):
             return
 
         try:
+            normalized_message = self._normalize_outgoing_message(message)
             if self._loop and self._loop.is_running():
-                asyncio.run_coroutine_threadsafe(
-                    self._async_send(str(message), chat_id),
-                    self._loop
-                ).result(timeout=10)
+                for item in normalized_message:
+                    coro = (
+                        self._async_send(item['text'], chat_id)
+                        if item['kind'] == 'text'
+                        else self._async_send_media(item, chat_id)
+                    )
+                    asyncio.run_coroutine_threadsafe(coro, self._loop).result(timeout=10)
             else:
                 loop = asyncio.new_event_loop()
                 try:
-                    loop.run_until_complete(self._async_send(str(message), chat_id))
+                    for item in normalized_message:
+                        coro = (
+                            self._async_send(item['text'], chat_id)
+                            if item['kind'] == 'text'
+                            else self._async_send_media(item, chat_id)
+                        )
+                        loop.run_until_complete(coro)
                 finally:
                     loop.close()
         except Exception as e:
@@ -234,27 +295,6 @@ class WhatsApp_Client(Chat_Client):
         sender = getattr(previous_message, 'sender', None)
         if sender:
             self.send_message(content, receiver=sender)
-
-    def send_to_org(self, message, subject="General"):
-        """Send a message to the organization manager."""
-        if self.org_manager_user_id:
-            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
-
-    def send_to_log(self, message, subject="Log"):
-        """Send a message to the log receiver."""
-        if self._manager_only_enabled() and self.org_manager_user_id:
-            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
-            return
-        if self.log_receiver is None:
-            return
-        try:
-            if self._loop and self._loop.is_running():
-                asyncio.run_coroutine_threadsafe(
-                    self._async_send(str(message), self.log_receiver),
-                    self._loop
-                ).result(timeout=10)
-        except Exception as e:
-            logger.exception(f'Error sending to log receiver: {e}')
 
     def get_history_messages(self, msg, max_previous_messages=10):
         """Get message history. Returns empty list."""

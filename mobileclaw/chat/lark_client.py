@@ -7,6 +7,7 @@ import asyncio
 from collections import OrderedDict
 import structlog
 import time
+import requests
 
 from mobileclaw.utils.interface import UniInterface
 from .chat_utils import Chat_Client
@@ -47,6 +48,9 @@ class Lark_Client(Chat_Client):
         self._stop_serving = False
         self._ws_client = None
         self._loop = None
+        self._tenant_access_token = None
+        self._tenant_access_token_expire_at = 0
+        self._resource_path_cache = {}
         # Message deduplication with OrderedDict (maintains insertion order)
         self._processed_message_ids = OrderedDict()
         # Maintain mapping of user names/ids to open_ids
@@ -129,7 +133,7 @@ class Lark_Client(Chat_Client):
                 mobiles = [org_manager.replace('-', '').replace(' ', '')]
             else:
                 # Assume it's already an open_id
-                logger.debug(f'Org manager appears to be an open_id: {org_manager}')
+                logger.debug(f'manager appears to be an open_id: {org_manager}')
                 return
 
             # Build request to convert email/phone to open_id
@@ -245,20 +249,61 @@ class Lark_Client(Chat_Client):
             # Parse message content
             if msg_type == "text":
                 try:
-                    content = json.loads(message.content).get("text", "")
+                    parsed = json.loads(message.content)
                 except json.JSONDecodeError:
+                    parsed = None
+                if isinstance(parsed, dict):
+                    rich_content = self._normalize_rich_content(parsed, message_id=message_id)
+                    if rich_content is not None:
+                        content = rich_content
+                    else:
+                        content = parsed.get("text", "")
+                else:
                     content = message.content or ""
+            elif msg_type == "image":
+                try:
+                    image_key = json.loads(message.content).get("image_key")
+                except json.JSONDecodeError:
+                    image_key = None
+                if image_key:
+                    file_path = self._download_resource_via_rest(message_id, image_key, "image", f"{image_key}.png")
+                    content = self._format_incoming_attachment_ref('image', file_path)
+                else:
+                    content = "[image]"
+            elif msg_type == "file":
+                try:
+                    payload = json.loads(message.content)
+                    file_key = payload.get("file_key")
+                    file_name = payload.get("file_name") or f"{file_key}.bin"
+                except json.JSONDecodeError:
+                    file_key = None
+                    file_name = "file.bin"
+                if file_key:
+                    file_path = self._download_resource_via_rest(message_id, file_key, "file", file_name)
+                    content = self._format_incoming_attachment_ref('file', file_path)
+                else:
+                    content = "[file]"
             else:
-                content = MSG_TYPE_MAP.get(msg_type, f"[{msg_type}]")
+                try:
+                    parsed = json.loads(message.content)
+                except (TypeError, json.JSONDecodeError):
+                    parsed = None
+                rich_content = self._normalize_rich_content(parsed, message_id=message_id)
+                if rich_content is not None:
+                    content = rich_content
+                else:
+                    content = MSG_TYPE_MAP.get(msg_type, f"[{msg_type}]")
 
             if not content:
                 return
 
-            self._set_org_manager_if_missing(
+            org_manager_set = self._set_org_manager_if_missing(
                 'org_manager_open_id',
                 'chat_lark_org_manager',
                 sender_id,
             )
+            if org_manager_set and self._should_send_system_message():
+                await self._send_text_reply(self._org_manager_status_text(), message_id)
 
             # Handle commands (only from org_manager)
             if content.startswith('/') and sender_id == self.org_manager_open_id:
@@ -293,6 +338,12 @@ class Lark_Client(Chat_Client):
             # Handle the message
             if not self._should_handle_incoming(sender_id, self.org_manager_open_id, logger=logger, channel='lark'):
                 return
+            if (
+                not self._is_command_message(content)
+                and self._ensure_report_receiver_global('lark', sender_name)
+                and self._should_send_system_message()
+            ):
+                await self._send_text_reply(self._receiver_status_text('report', True), message_id)
             if hasattr(self.agent, 'handle_message'):
                 self.agent.handle_message(
                     message=content,
@@ -340,32 +391,22 @@ class Lark_Client(Chat_Client):
         try:
             if command.endswith("/log_here"):
                 self.log_receiver = chat_id
-                # Set global log channel
-                self.agent.chat.log_channel = 'lark'
-                response_text = f"✅ Log receiver set to this chat. Logs will be sent here."
-                logger.info(f"Log receiver set to chat_id: {chat_id}, global log channel set to lark")
+                response_text = self._set_log_receiver_global('lark', f"group:{chat_id}")
+                logger.info(f"Log receiver set to chat_id: {chat_id}")
 
             elif command.endswith("/stop_log_here"):
                 self.log_receiver = None
-                # Clear global log channel if it was lark
-                if self.agent.chat.log_channel == 'lark':
-                    self.agent.chat.log_channel = None
-                response_text = f"✅ Log receiver cleared. Logs will no longer be sent."
+                response_text = self._clear_log_receiver_global()
                 logger.info("Log receiver cleared")
 
             elif command.endswith("/report_here"):
                 self.report_receiver = chat_id
-                # Set global report channel
-                self.agent.chat.report_channel = 'lark'
-                response_text = f"✅ Report receiver set to this chat. Progress reports will be sent here."
-                logger.info(f"Report receiver set to chat_id: {chat_id}, global report channel set to lark")
+                response_text = self._set_report_receiver_global('lark', f"group:{chat_id}")
+                logger.info(f"Report receiver set to chat_id: {chat_id}")
 
             elif command.endswith("/stop_report_here"):
                 self.report_receiver = None
-                # Clear global report channel if it was lark
-                if self.agent.chat.report_channel == 'lark':
-                    self.agent.chat.report_channel = None
-                response_text = f"✅ Report receiver cleared. Reports will be sent to org_manager."
+                response_text = self._clear_report_receiver_global()
                 logger.info("Report receiver cleared")
 
             else:
@@ -373,10 +414,7 @@ class Lark_Client(Chat_Client):
                 response_text = (
                     f"❓ Unknown command: {command}\n\n"
                     "Available commands:\n"
-                    "/log_here - Set this chat as log receiver\n"
-                    "/stop_log_here - Stop sending logs to this chat\n"
-                    "/report_here - Set this chat as report receiver\n"
-                    "/stop_report_here - Stop sending reports to this chat"
+                    f"{self._available_system_commands_text()}"
                 )
 
             # Send response as reply
@@ -475,8 +513,207 @@ class Lark_Client(Chat_Client):
             "config": {"wide_screen_mode": True},
             "elements": elements,
         }
+
+    def _get_tenant_access_token(self):
+        if self._tenant_access_token and time.time() < self._tenant_access_token_expire_at - 60:
+            return self._tenant_access_token
+
+        response = requests.post(
+            "https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+            json={
+                "app_id": self.agent.config.chat_lark_app_id,
+                "app_secret": self.agent.config.chat_lark_app_secret,
+            },
+            timeout=30,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("code") != 0:
+            raise RuntimeError(f'Failed to get Lark tenant access token: {data}')
+        self._tenant_access_token = data["tenant_access_token"]
+        self._tenant_access_token_expire_at = time.time() + int(data.get("expire", 7200))
+        return self._tenant_access_token
+
+    def _upload_image_via_rest(self, item):
+        token = self._get_tenant_access_token()
+        with open(item['abs_path'], 'rb') as file_obj:
+            response = requests.post(
+                "https://open.feishu.cn/open-apis/im/v1/images",
+                headers={"Authorization": f"Bearer {token}"},
+                data={"image_type": "message"},
+                files={"image": (item['name'], file_obj, item['mime_type'])},
+                timeout=60,
+            )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("code") != 0:
+            raise RuntimeError(f'Lark image upload failed: {data}')
+        image_key = data["data"]["image_key"]
+        self._resource_path_cache[image_key] = self._relative_to_agent_dir(item['abs_path'])
+        return image_key
+
+    def _upload_file_via_rest(self, item):
+        token = self._get_tenant_access_token()
+        with open(item['abs_path'], 'rb') as file_obj:
+            response = requests.post(
+                "https://open.feishu.cn/open-apis/im/v1/files",
+                headers={"Authorization": f"Bearer {token}"},
+                data={"file_type": "stream", "file_name": item['name']},
+                files={"file": (item['name'], file_obj, item['mime_type'])},
+                timeout=60,
+            )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("code") != 0:
+            raise RuntimeError(f'Lark file upload failed: {data}')
+        file_key = data["data"]["file_key"]
+        self._resource_path_cache[file_key] = self._relative_to_agent_dir(item['abs_path'])
+        return file_key
+
+    def _send_media_via_rest(self, receive_id_type, receive_id, item):
+        token = self._get_tenant_access_token()
+        if item['message_type'] == 'image':
+            msg_type = 'image'
+            content = {"image_key": self._upload_image_via_rest(item)}
+        else:
+            msg_type = 'file'
+            content = {"file_key": self._upload_file_via_rest(item)}
+
+        response = requests.post(
+            f"https://open.feishu.cn/open-apis/im/v1/messages?receive_id_type={receive_id_type}",
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Content-Type": "application/json; charset=utf-8",
+            },
+            json={
+                "receive_id": receive_id,
+                "msg_type": msg_type,
+                "content": json.dumps(content, ensure_ascii=False),
+            },
+            timeout=60,
+        )
+        response.raise_for_status()
+        data = response.json()
+        if data.get("code") != 0:
+            raise RuntimeError(f'Lark send media failed: {data}')
+        return data
+
+    def _download_resource_via_rest(self, message_id, file_key, resource_type, filename):
+        token = self._get_tenant_access_token()
+        response = requests.get(
+            f"https://open.feishu.cn/open-apis/im/v1/messages/{message_id}/resources/{file_key}",
+            params={"type": resource_type},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=60,
+        )
+        response.raise_for_status()
+        local_path = self._save_incoming_media_bytes('lark', filename, response.content)
+        self._resource_path_cache[file_key] = self._relative_to_agent_dir(local_path)
+        return local_path
+
+    def _normalize_rich_content(self, parsed, message_id=None):
+        if not isinstance(parsed, dict):
+            return None
+
+        rows = parsed.get("content")
+        if not isinstance(rows, list):
+            return None
+
+        normalized = dict(parsed)
+        normalized_rows = []
+
+        for row in rows:
+            if not isinstance(row, list):
+                normalized_rows.append(row)
+                continue
+
+            normalized_row = []
+            for element in row:
+                if not isinstance(element, dict):
+                    normalized_row.append(element)
+                    continue
+
+                tag = element.get("tag")
+                normalized_element = dict(element)
+
+                if tag == "img":
+                    image_key = element.get("image_key")
+                    image_path = self._resource_path_cache.get(image_key) if image_key else None
+                    if image_key and image_path is None and message_id:
+                        local_path = self._download_resource_via_rest(
+                            message_id,
+                            image_key,
+                            "image",
+                            f"{image_key}.png",
+                        )
+                        image_path = self._relative_to_agent_dir(local_path)
+                    if image_path:
+                        normalized_element["image_path"] = image_path
+
+                elif tag == "file":
+                    file_key = element.get("file_key")
+                    file_name = element.get("file_name") or f"{file_key}.bin"
+                    file_path = self._resource_path_cache.get(file_key) if file_key else None
+                    if file_key and file_path is None and message_id:
+                        local_path = self._download_resource_via_rest(
+                            message_id,
+                            file_key,
+                            "file",
+                            file_name,
+                        )
+                        file_path = self._relative_to_agent_dir(local_path)
+                    if file_path:
+                        normalized_element["file_path"] = file_path
+
+                normalized_row.append(normalized_element)
+
+            normalized_rows.append(normalized_row)
+
+        normalized["content"] = normalized_rows
+        return json.dumps(normalized, ensure_ascii=False)
+
+    def _normalize_history_content(self, message_type, raw_content, message_id=None):
+        try:
+            parsed = json.loads(raw_content) if isinstance(raw_content, str) else raw_content
+        except json.JSONDecodeError:
+            return raw_content
+
+        rich_content = self._normalize_rich_content(parsed, message_id=message_id)
+        if rich_content is not None:
+            return rich_content
+
+        if message_type == "image" and isinstance(parsed, dict):
+            image_key = parsed.get("image_key")
+            if image_key and image_key in self._resource_path_cache:
+                return json.dumps({
+                    "image_key": image_key,
+                    "image_path": self._resource_path_cache[image_key],
+                }, ensure_ascii=False)
+
+        if message_type == "file" and isinstance(parsed, dict):
+            file_key = parsed.get("file_key")
+            if file_key and file_key in self._resource_path_cache:
+                normalized = {"file_key": file_key, "file_path": self._resource_path_cache[file_key]}
+                if parsed.get("file_name"):
+                    normalized["file_name"] = parsed["file_name"]
+                return json.dumps(normalized, ensure_ascii=False)
+
+        if message_type == "interactive" and isinstance(parsed, dict):
+            if parsed.get("title") is None:
+                elements = parsed.get("elements")
+                if (
+                    isinstance(elements, list)
+                    and len(elements) == 1
+                    and isinstance(elements[0], list)
+                    and len(elements[0]) == 1
+                    and isinstance(elements[0][0], dict)
+                    and elements[0][0].get("tag") == "text"
+                ):
+                    return json.dumps({"text": elements[0][0].get("text", "")}, ensure_ascii=False)
+
+        return json.dumps(parsed, ensure_ascii=False) if isinstance(parsed, (dict, list)) else raw_content
     
-    def send_message(self, message, receiver=None, subject=None):
+    def send_message(self, message, receiver=None, _type=None):
         """
         Send a message to receiver.
 
@@ -521,43 +758,36 @@ class Lark_Client(Chat_Client):
                 receive_id = self._user_mapping.get(receiver, receiver)
                 receive_id_type = "open_id"
 
-            # Prepare message content with card format for rich formatting
-            if isinstance(message, str):
-                # Build card with markdown + table support
-                card = self._build_card(message)
-                msg_content = json.dumps(card, ensure_ascii=False)
-                msg_type = "interactive"
-            else:
-                # For now, only support text messages
-                card = self._build_card(str(message))
-                msg_content = json.dumps(card, ensure_ascii=False)
-                msg_type = "interactive"
+            responses = []
+            for item in self._normalize_outgoing_message(message):
+                if item['kind'] == 'text':
+                    card = self._build_card(item['text'])
+                    msg_content = json.dumps(card, ensure_ascii=False)
+                    request = CreateMessageRequest.builder() \
+                        .receive_id_type(receive_id_type) \
+                        .request_body(CreateMessageRequestBody.builder()
+                            .receive_id(receive_id)
+                            .msg_type("interactive")
+                            .content(msg_content)
+                            .build()) \
+                        .build()
 
-            # Build and send request
-            request = CreateMessageRequest.builder() \
-                .receive_id_type(receive_id_type) \
-                .request_body(CreateMessageRequestBody.builder()
-                    .receive_id(receive_id)
-                    .msg_type(msg_type)
-                    .content(msg_content)
-                    .build()) \
-                .build()
+                    response = self.client.im.v1.message.create(request)
 
-            response = self.client.im.v1.message.create(request)
+                    if not response.success():
+                        err_msg = ''
+                        if 'Invalid' in response.msg:
+                            err_msg = 'The `receiver` param should either be a user open_id or a chat_id with "group:" prefix'
+                        logger.error(
+                            f"Failed to send Lark message: code={response.code}, "
+                            f"msg={response.msg}, log_id={response.get_log_id()}. {err_msg}"
+                        )
+                        raise Exception(f'send_message failed: {response.msg}. {err_msg}')
+                    responses.append(response)
+                else:
+                    responses.append(self._send_media_via_rest(receive_id_type, receive_id, item))
 
-            if not response.success():
-                err_msg = ''
-                if 'Invalid' in response.msg:
-                    err_msg = 'The `receiver` param should either be a user open_id or a chat_id with "group:" prefix'
-                logger.error(
-                    f"Failed to send Lark message: code={response.code}, "
-                    f"msg={response.msg}, log_id={response.get_log_id()}. {err_msg}"
-                )
-                raise Exception(f'send_message failed: {response.msg}. {err_msg}')
-            else:
-                logger.debug(f"Lark message sent to {receive_id}")
-
-            return response
+            return responses[-1] if responses else None
 
         except Exception as e:
             logger.exception(f'Error sending message: {e}', action='send_message', status='failed')
@@ -593,8 +823,22 @@ class Lark_Client(Chat_Client):
                     # Convert timestamp to human-readable format
                     from datetime import datetime
                     timestamp = datetime.fromtimestamp(int(message.create_time) / 1000).strftime('%Y-%m-%d %H:%M:%S')
-                    sender_name = message.sender.id # sender's openid
-                    content = message.body.content
+                    sender_name = "unknown"
+                    if getattr(message, "sender", None) and getattr(message.sender, "id", None):
+                        sender_name = message.sender.id
+
+                    message_type = getattr(message, "msg_type", None) or getattr(message, "message_type", None)
+                    raw_content = None
+                    if getattr(message, "body", None) is not None:
+                        raw_content = getattr(message.body, "content", None)
+                    normalized_content = self._normalize_history_content(message_type, raw_content, message.message_id)
+
+                    if normalized_content is None:
+                        normalized_content = raw_content
+                    if normalized_content is None:
+                        normalized_content = ""
+
+                    content = normalized_content
                     messages_to_return.append((sender_name, content, timestamp))
             else:
                 raise Exception(f'{response.code}: {response.msg}')
@@ -681,7 +925,7 @@ class Lark_Client(Chat_Client):
             logger.exception(f'Failed to create chat {chat_name}: {e}', action='create_chat', status='failed')
             raise
 
-    def _send_to_chat(self, chat_name, message, subject=None, description=None):
+    def _send_to_chat(self, chat_name, message, _type=None, description=None):
         """
         Helper method to send a message to a chat, creating it if it doesn't exist.
 
@@ -707,43 +951,8 @@ class Lark_Client(Chat_Client):
 
         # Send the message
         try:
-            self.send_message(message, receiver=f'group:{chat_id}', subject=subject)
+            self.send_message(message, receiver=f'group:{chat_id}', _type=_type)
             logger.debug(f'Message sent to chat: {chat_name}', action='_send_to_chat', status='success')
         except Exception as e:
             logger.exception(f'Failed to send message to chat {chat_name}: {e}')
             raise
-
-    def send_to_org(self, message, subject=None):
-        """
-        Sends a message to the organization chat.
-        Creates the chat if it doesn't exist.
-
-        Args:
-            message: Message content to send
-            subject: Subject/topic for the message (optional)
-        """
-        chat_name = f'{self.agent.org_name}'
-        description = f"Organization chat of {self.agent.org_name}"
-        self._send_to_chat(chat_name, message, subject, description)
-
-    def send_to_log(self, message, subject=None):
-        """
-        Sends a message to the log receiver chat.
-        If log_receiver is not set, returns without sending.
-
-        Args:
-            message: Message content to send
-            subject: Subject/topic for the message (optional)
-        """
-        if self._manager_only_enabled() and self.org_manager_open_id:
-            self.send_message(message, receiver=self.org_manager_open_id, subject=subject)
-            return
-        if self.log_receiver is None:
-            logger.debug('No log receiver set, skipping send_to_log')
-            return
-
-        try:
-            # Send to the configured log receiver chat
-            self.send_message(message, receiver=f"group:{self.log_receiver}", subject=subject)
-        except Exception as e:
-            logger.exception(f'Error sending to log receiver: {e}')

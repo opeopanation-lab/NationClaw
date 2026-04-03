@@ -2,9 +2,11 @@
 The Slack chat client implementation using Socket Mode.
 """
 import asyncio
+from pathlib import Path
 import re
 from threading import Thread
 import structlog
+import requests
 
 from .chat_utils import Chat_Client
 
@@ -132,6 +134,34 @@ class Slack_Client(Chat_Client):
             return
 
         text = event.get("text") or ""
+        content_parts = [text] if text else []
+
+        for file_info in event.get("files") or []:
+            file_url = file_info.get("url_private_download") or file_info.get("url_private")
+            if not file_url:
+                continue
+            filename = file_info.get("name") or "attachment"
+            try:
+                response = requests.get(
+                    file_url,
+                    headers={"Authorization": f"Bearer {self.agent.config.chat_slack_bot_token}"},
+                    timeout=30,
+                )
+                response.raise_for_status()
+                file_path = self._save_incoming_media_bytes(
+                    'slack',
+                    filename.replace("/", "_"),
+                    response.content,
+                )
+                if (file_info.get("mimetype") or "").startswith("image/"):
+                    content_parts.append(self._format_incoming_attachment_ref('image', file_path))
+                else:
+                    content_parts.append(self._format_incoming_attachment_ref('file', file_path))
+            except Exception as e:
+                logger.warning(f"Failed to download Slack attachment: {e}")
+                content_parts.append(f"[attachment: {filename} - download failed]")
+
+        text = "\n".join([part for part in content_parts if part]).strip()
 
         # Avoid double-processing: prefer app_mention over message with mention
         if event_type == "message" and self._bot_user_id and f"<@{self._bot_user_id}>" in text:
@@ -143,11 +173,16 @@ class Slack_Client(Chat_Client):
         # Store channel_id for replies
         self._channel_ids[sender_id] = chat_id
 
-        self._set_org_manager_if_missing(
+        org_manager_set = self._set_org_manager_if_missing(
             'org_manager_user_id',
             'chat_slack_org_manager',
             sender_id,
         )
+        if org_manager_set and self._web_client and self._should_send_system_message():
+            try:
+                await self._web_client.chat_postMessage(channel=chat_id, text=self._org_manager_status_text(), thread_ts=thread_ts)
+            except Exception as e:
+                logger.error(f"Error sending Slack manager response: {e}")
 
         # Strip bot mention from text
         if self._bot_user_id:
@@ -173,6 +208,16 @@ class Slack_Client(Chat_Client):
             return
         if not self._should_handle_incoming(sender_id, self.org_manager_user_id, logger=logger, channel='slack'):
             return
+        if (
+            not self._is_command_message(text)
+            and self._ensure_report_receiver_global('slack', chat_id)
+            and self._web_client
+            and self._should_send_system_message()
+        ):
+            try:
+                await self._web_client.chat_postMessage(channel=chat_id, text=self._receiver_status_text('report', True), thread_ts=thread_ts)
+            except Exception as e:
+                logger.error(f"Error sending Slack report receiver response: {e}")
 
         # Call agent's message handler
         if hasattr(self.agent, 'handle_message'):
@@ -188,22 +233,16 @@ class Slack_Client(Chat_Client):
         response_text = None
         if command == '/log_here':
             self.log_receiver = channel_id
-            self.agent.chat.log_channel = 'slack'
-            response_text = "Log receiver set to this channel."
+            response_text = self._set_log_receiver_global('slack', channel_id)
         elif command == '/stop_log_here':
             self.log_receiver = None
-            if self.agent.chat.log_channel == 'slack':
-                self.agent.chat.log_channel = None
-            response_text = "Log receiver cleared."
+            response_text = self._clear_log_receiver_global()
         elif command == '/report_here':
             self.report_receiver = channel_id
-            self.agent.chat.report_channel = 'slack'
-            response_text = "Report receiver set to this channel."
+            response_text = self._set_report_receiver_global('slack', channel_id)
         elif command == '/stop_report_here':
             self.report_receiver = None
-            if self.agent.chat.report_channel == 'slack':
-                self.agent.chat.report_channel = None
-            response_text = "Report receiver cleared."
+            response_text = self._clear_report_receiver_global()
 
         if response_text and self._web_client:
             try:
@@ -228,7 +267,19 @@ class Slack_Client(Chat_Client):
         except Exception as e:
             logger.error(f"Error sending Slack message: {e}")
 
-    def send_message(self, message, receiver=None, subject=None):
+    async def _async_send_attachment(self, item, channel_id):
+        """Send an attachment to Slack."""
+        if not self._web_client:
+            return
+        with open(item['abs_path'], 'rb') as file_obj:
+            await self._web_client.files_upload_v2(
+                channel=channel_id,
+                file=file_obj,
+                filename=item['name'],
+                title=item['name'],
+            )
+
+    def send_message(self, message, receiver=None, _type=None):
         """Send a message to a user or channel."""
         if not self._web_client or not self._loop:
             logger.warning('Slack client not initialized')
@@ -253,15 +304,25 @@ class Slack_Client(Chat_Client):
             return
 
         try:
+            normalized_message = self._normalize_outgoing_message(message)
             if self._loop.is_running():
-                asyncio.run_coroutine_threadsafe(
-                    self._async_send(str(message), channel_id),
-                    self._loop
-                ).result(timeout=10)
+                for item in normalized_message:
+                    coro = (
+                        self._async_send(item['text'], channel_id)
+                        if item['kind'] == 'text'
+                        else self._async_send_attachment(item, channel_id)
+                    )
+                    asyncio.run_coroutine_threadsafe(coro, self._loop).result(timeout=10)
             else:
                 loop = asyncio.new_event_loop()
                 try:
-                    loop.run_until_complete(self._async_send(str(message), channel_id))
+                    for item in normalized_message:
+                        coro = (
+                            self._async_send(item['text'], channel_id)
+                            if item['kind'] == 'text'
+                            else self._async_send_attachment(item, channel_id)
+                        )
+                        loop.run_until_complete(coro)
                 finally:
                     loop.close()
         except Exception as e:
@@ -272,27 +333,6 @@ class Slack_Client(Chat_Client):
         sender = getattr(previous_message, 'sender', None)
         if sender:
             self.send_message(content, receiver=sender)
-
-    def send_to_org(self, message, subject="General"):
-        """Send a message to the organization manager."""
-        if self.org_manager_user_id:
-            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
-
-    def send_to_log(self, message, subject="Log"):
-        """Send a message to the log receiver."""
-        if self._manager_only_enabled() and self.org_manager_user_id:
-            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
-            return
-        if self.log_receiver is None:
-            return
-        try:
-            if self._loop and self._loop.is_running():
-                asyncio.run_coroutine_threadsafe(
-                    self._async_send(str(message), self.log_receiver),
-                    self._loop
-                ).result(timeout=10)
-        except Exception as e:
-            logger.exception(f'Error sending to log receiver: {e}')
 
     def get_history_messages(self, msg, max_previous_messages=10):
         """Get message history. Returns empty list."""

@@ -108,22 +108,18 @@ class Telegram_Client(Chat_Client):
         self._chat_ids = {}  # {sender_id: chat_id}
         self._chat_history = defaultdict(lambda: deque(maxlen=20))
         self._history_lock = Lock()
-        # Log receiver for send_to_log messages
-        self.log_receiver = None  # Set via /log_here command
-        # Report receiver for send_message when receiver is None
-        self.report_receiver = None  # Set via /report_here command
-
     def _set_org_manager_if_missing(self, attr_name, config_name, sender_id):
-        """Persist the first Telegram sender as org manager when not configured."""
+        """Persist the first Telegram sender as manager when not configured."""
         current_value = getattr(self, attr_name, None)
         if current_value not in (None, "", "?"):
-            return
+            return False
 
         setattr(self, attr_name, sender_id)
         if hasattr(self.agent.config, config_name):
             setattr(self.agent.config, config_name, sender_id)
 
-        logger.info(f"Telegram org manager initialized to {sender_id}")
+        logger.info(f"Telegram manager initialized to {sender_id}")
+        return True
 
     def _remember_chat_id(self, sender_id, chat_id):
         """Cache chat_id for both raw numeric ID and username-qualified ID."""
@@ -278,14 +274,12 @@ class Telegram_Client(Chat_Client):
 
         # Check if user is org_manager
         if user_id != self.org_manager_user_id and str(user.id) != self.org_manager_user_id:
-            await update.message.reply_text("❌ Only the organization manager can use this command.")
+            await update.message.reply_text("❌ Only the manager can use this command.")
             return
 
         self.log_receiver = user_id
-        # Set global log channel
-        self.agent.chat.log_channel = 'telegram'
-        logger.info(f"Log receiver set to user_id: {user_id}, global log channel set to telegram")
-        await update.message.reply_text("✅ Log receiver set. Logs will be sent to you.")
+        logger.info(f"Log receiver set to user_id: {user_id}")
+        await update.message.reply_text(self._set_log_receiver_global('telegram', user_id))
 
     async def _on_stop_log_here(self, update, context):
         """Handle /stop_log_here command."""
@@ -299,15 +293,12 @@ class Telegram_Client(Chat_Client):
 
         # Check if user is org_manager
         if user_id != self.org_manager_user_id and str(user.id) != self.org_manager_user_id:
-            await update.message.reply_text("❌ Only the organization manager can use this command.")
+            await update.message.reply_text("❌ Only the manager can use this command.")
             return
 
         self.log_receiver = None
-        # Clear global log channel if it was telegram
-        if self.agent.chat.log_channel == 'telegram':
-            self.agent.chat.log_channel = None
         logger.info("Log receiver cleared")
-        await update.message.reply_text("✅ Log receiver cleared. Logs will no longer be sent.")
+        await update.message.reply_text(self._clear_log_receiver_global())
 
     async def _on_report_here(self, update, context):
         """Handle /report_here command."""
@@ -321,14 +312,12 @@ class Telegram_Client(Chat_Client):
 
         # Check if user is org_manager
         if user_id != self.org_manager_user_id and str(user.id) != self.org_manager_user_id:
-            await update.message.reply_text("❌ Only the organization manager can use this command.")
+            await update.message.reply_text("❌ Only the manager can use this command.")
             return
 
         self.report_receiver = user_id
-        # Set global report channel
-        self.agent.chat.report_channel = 'telegram'
-        logger.info(f"Report receiver set to user_id: {user_id}, global report channel set to telegram")
-        await update.message.reply_text("✅ Report receiver set. Progress reports will be sent to you.")
+        logger.info(f"Report receiver set to user_id: {user_id}")
+        await update.message.reply_text(self._set_report_receiver_global('telegram', user_id))
 
     async def _on_stop_report_here(self, update, context):
         """Handle /stop_report_here command."""
@@ -342,15 +331,13 @@ class Telegram_Client(Chat_Client):
 
         # Check if user is org_manager
         if user_id != self.org_manager_user_id and str(user.id) != self.org_manager_user_id:
-            await update.message.reply_text("❌ Only the organization manager can use this command.")
+            await update.message.reply_text("❌ Only the manager can use this command.")
             return
 
         self.report_receiver = None
-        # Clear global report channel if it was telegram
-        if self.agent.chat.report_channel == 'telegram':
-            self.agent.chat.report_channel = None
         logger.info("Report receiver cleared")
-        await update.message.reply_text("✅ Report receiver cleared. Reports will be sent to org_manager.")
+        await update.message.reply_text(self._clear_report_receiver_global())
+
 
     async def _on_message(self, update, context):
         """Handle incoming messages (text, photos, voice, documents)."""
@@ -369,19 +356,21 @@ class Telegram_Client(Chat_Client):
         # Store chat_id for replies
         self._remember_chat_id(sender_id, chat_id)
 
-        self._set_org_manager_if_missing(
+        org_manager_set = self._set_org_manager_if_missing(
             'org_manager_user_id',
             'chat_telegram_org_manager',
             sender_id,
         )
+        if org_manager_set and self._should_send_system_message():
+            await message.reply_text(self._org_manager_status_text())
         if not self._should_handle_incoming(sender_id, self.org_manager_user_id, logger=logger, channel='telegram'):
             return
-
-        self._set_org_manager_if_missing(
-            'org_manager_user_id',
-            'chat_telegram_org_manager',
-            sender_id,
-        )
+        if (
+            not self._is_command_message(message.text)
+            and self._ensure_report_receiver_global('telegram', sender_id)
+            and self._should_send_system_message()
+        ):
+            await message.reply_text(self._receiver_status_text('report', True))
 
         # Build content from text and/or media
         content_parts = []
@@ -415,16 +404,14 @@ class Telegram_Client(Chat_Client):
             try:
                 file = await self._app.bot.get_file(media_file.file_id)
                 ext = self._get_extension(media_type, getattr(media_file, 'mime_type', None))
-
-                # Save to ~/.mobileclaw/media/
-                media_dir = Path.home() / ".mobileclaw" / "media"
-                media_dir.mkdir(parents=True, exist_ok=True)
-
-                file_path = media_dir / f"{media_file.file_id[:16]}{ext}"
-                await file.download_to_drive(str(file_path))
+                file_path = self._save_incoming_media_bytes(
+                    'telegram',
+                    f"{media_file.file_id[:16]}{ext}",
+                    bytes(await file.download_as_bytearray()),
+                )
 
                 media_paths.append(str(file_path))
-                content_parts.append(f"[{media_type}: {file_path}]")
+                content_parts.append(self._format_incoming_attachment_ref(media_type, file_path))
 
                 logger.debug(f"Downloaded {media_type} to {file_path}")
             except Exception as e:
@@ -477,7 +464,7 @@ class Telegram_Client(Chat_Client):
             return ".bin"
         return ""
 
-    def send_message(self, message, receiver=None, subject=None):
+    def send_message(self, message, receiver=None, _type=None):
         """Send a message to a user."""
         if not self._app:
             logger.warning('Telegram client not initialized')
@@ -487,11 +474,10 @@ class Telegram_Client(Chat_Client):
             receiver = manager_receiver
 
         if receiver is None:
-            # Use report_receiver if set, otherwise default to org_manager
             if self.report_receiver:
                 receiver = self.report_receiver
             else:
-                receiver = self.org_manager_user_id
+                return None
 
         if not receiver:
             logger.warning('No receiver specified for Telegram message')
@@ -531,24 +517,43 @@ class Telegram_Client(Chat_Client):
     async def _async_send_message(self, message, chat_id):
         """Async helper to send message."""
         try:
-            plain_message = str(message)
-            # Convert markdown to Telegram HTML
-            html_content = _markdown_to_telegram_html(plain_message)
+            for item in self._normalize_outgoing_message(message):
+                if item['kind'] == 'text':
+                    plain_message = item['text']
+                    html_content = _markdown_to_telegram_html(plain_message)
 
-            try:
-                await self._app.bot.send_message(
-                    chat_id=int(chat_id),
-                    text=html_content,
-                    parse_mode="HTML"
-                )
-            except Exception as e:
-                # Fallback to plain text if HTML parsing fails
-                logger.warning(f'HTML parse failed, falling back to plain text: {e}')
-                await self._app.bot.send_message(
-                    chat_id=int(chat_id),
-                    text=plain_message
-                )
-            self._append_history(str(chat_id), 'assistant', plain_message)
+                    try:
+                        await self._app.bot.send_message(
+                            chat_id=int(chat_id),
+                            text=html_content,
+                            parse_mode="HTML"
+                        )
+                    except Exception as e:
+                        logger.warning(f'HTML parse failed, falling back to plain text: {e}')
+                        await self._app.bot.send_message(
+                            chat_id=int(chat_id),
+                            text=plain_message
+                        )
+                    self._append_history(str(chat_id), 'assistant', plain_message)
+                    continue
+
+                message_type = item['message_type']
+                file_path = item['abs_path']
+                display_text = f"[{message_type}: {item['rel_path']}]"
+
+                with open(file_path, 'rb') as file_obj:
+                    if message_type == 'image':
+                        await self._app.bot.send_photo(
+                            chat_id=int(chat_id),
+                            photo=file_obj,
+                        )
+                    else:
+                        await self._app.bot.send_document(
+                            chat_id=int(chat_id),
+                            document=file_obj,
+                            filename=item['name'],
+                        )
+                self._append_history(str(chat_id), 'assistant', display_text)
         except Exception as e:
             logger.error(f'Error in async send: {e}')
             raise
@@ -561,30 +566,6 @@ class Telegram_Client(Chat_Client):
             self.send_message(content, receiver=sender)
         else:
             logger.warning('Cannot reply: no sender in previous message')
-
-    def send_to_org(self, message, subject="General"):
-        """Send a message to the organization manager."""
-        if self.org_manager_user_id:
-            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
-        else:
-            logger.warning('No org manager configured for Telegram')
-
-    def send_to_log(self, message, subject="Log"):
-        """
-        Send a message to the log receiver.
-        If log_receiver is not set, returns without sending.
-        """
-        if self._manager_only_enabled() and self.org_manager_user_id:
-            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
-            return
-        if self.log_receiver is None:
-            logger.debug('No log receiver set, skipping send_to_log')
-            return
-
-        try:
-            self.send_message(message, receiver=self.log_receiver, subject=subject)
-        except Exception as e:
-            logger.exception(f'Error sending to log receiver: {e}')
 
     def get_history_messages(self, msg, max_previous_messages=10):
         """Get recent cached message history for the current chat."""
@@ -601,6 +582,8 @@ class Telegram_Client(Chat_Client):
 
     def _append_history(self, chat_id, sender, content):
         """Append one message to in-memory chat history."""
+        if self._should_skip_history(content):
+            return
         timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         with self._history_lock:
             self._chat_history[str(chat_id)].append((str(sender), str(content), timestamp))

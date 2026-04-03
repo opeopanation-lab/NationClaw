@@ -6,8 +6,10 @@ import io
 import random
 import requests
 import base64
+import os
 from threading import Thread
 import structlog
+from urllib.parse import quote, unquote
 
 try:
     import zulip
@@ -40,6 +42,47 @@ class Zulip_Client(Chat_Client):
         self.log_receiver = None  # Set via /log_here command
         # Report receiver for send_message when receiver is None
         self.report_receiver = None  # Set via /report_here command
+
+    @staticmethod
+    def _encode_stream_receiver(stream_name, topic=None):
+        stream = quote(str(stream_name or ''), safe='')
+        topic = quote(str(topic or ''), safe='')
+        return f'group:{stream}?topic={topic}'
+
+    @staticmethod
+    def _decode_stream_receiver(receiver):
+        payload = str(receiver)[6:]
+        if '?topic=' in payload:
+            stream_part, topic_part = payload.split('?topic=', 1)
+            return unquote(stream_part), unquote(topic_part)
+        return unquote(payload), None
+
+    def _replace_and_download_incoming_attachments(self, content):
+        """Download Zulip uploaded attachments and replace links with local temp paths."""
+        if not content:
+            return content
+
+        link_pattern = re.compile(r'\[([^\]]*)\]\((/user_uploads/[^)]+)\)')
+
+        def replace_match(match):
+            link_text = match.group(1) or ""
+            relative_url = match.group(2)
+            filename = os.path.basename(relative_url.split('?', 1)[0]) or 'attachment'
+            full_url = f'{self.server_url.rstrip("/")}{relative_url}'
+
+            try:
+                response = self.client.session.get(full_url, timeout=30)
+                response.raise_for_status()
+                local_path = self._save_incoming_media_bytes('zulip', filename, response.content)
+            except Exception as e:
+                logger.warning(f'Failed to download Zulip attachment: {e}')
+                return match.group(0)
+
+            rel_path = os.path.relpath(local_path, self.agent.file.agent_dir)
+            link_label = link_text or filename
+            return f'[{link_label}]({rel_path})'
+
+        return link_pattern.sub(replace_match, content)
 
     def _open(self):
         if not ZULIP_AVAILABLE:
@@ -97,7 +140,7 @@ class Zulip_Client(Chat_Client):
             return
 
         msg = event['message']
-        content = msg['content'].strip()
+        content = self._replace_and_download_incoming_attachments(msg['content'].strip())
 
         if msg['sender_email'] in [self.zulip_email, 'notification-bot@zulip.com']:
             # Ignoring message sent by myself and notification bot
@@ -108,11 +151,13 @@ class Zulip_Client(Chat_Client):
         sender_id = msg['sender_id']
         sender_name = msg['sender_full_name']
 
-        self._set_org_manager_if_missing(
+        org_manager_set = self._set_org_manager_if_missing(
             'org_manager_email',
             'chat_zulip_org_manager',
             sender_email,
         )
+        if org_manager_set and self._should_send_system_message():
+            self.send_reply(self._org_manager_status_text(), msg)
 
         # Handle commands (only from org_manager)
         if content.startswith('/') and sender_email == self.org_manager_email:
@@ -126,7 +171,7 @@ class Zulip_Client(Chat_Client):
                 # The agent has been mentioned
                 pass
             group_name = msg['display_recipient']
-            sender_name_new = f"group:{group_name}"
+            sender_name_new = self._encode_stream_receiver(group_name, msg.get('subject'))
 
         # Maintain user mapping for future message sending
         self._user_mapping[sender_name] = sender_email
@@ -140,6 +185,12 @@ class Zulip_Client(Chat_Client):
         history_content = "\n".join([f'[{m[2]}] {m[0]}: {m[1]}' for m in history_messages])
         if not self._should_handle_incoming(sender_email, self.org_manager_email, logger=logger, channel='zulip'):
             return
+        if (
+            not self._is_command_message(content)
+            and self._ensure_report_receiver_global('zulip', sender_name_new)
+            and self._should_send_system_message()
+        ):
+            self.send_reply(self._receiver_status_text('report', True), msg)
         self.agent.handle_message(content, history=history_content, sender=sender_name_new, channel='zulip')
 
     def _handle_command(self, command: str, msg):
@@ -155,39 +206,28 @@ class Zulip_Client(Chat_Client):
             if msg['type'] == 'private':
                 receiver = msg['sender_email']
             else:
-                # For stream messages, use "group:stream_name" format
-                receiver = f"group:{msg['display_recipient']}"
+                receiver = self._encode_stream_receiver(msg['display_recipient'], msg.get('subject'))
 
             if command.endswith("/log_here"):
                 # Set local log receiver
                 self.log_receiver = receiver
-                # Set global log channel
-                self.agent.chat.log_channel = 'zulip'
-                response_text = "✅ Log receiver set to this chat. Logs will be sent here."
-                logger.info(f"Log receiver set to: {receiver}, global log channel set to zulip")
+                response_text = self._set_log_receiver_global('zulip', receiver)
+                logger.info(f"Log receiver set to: {receiver}")
 
             elif command.endswith("/stop_log_here"):
                 self.log_receiver = None
-                # Clear global log channel if it was zulip
-                if self.agent.chat.log_channel == 'zulip':
-                    self.agent.chat.log_channel = None
-                response_text = "✅ Log receiver cleared. Logs will no longer be sent."
+                response_text = self._clear_log_receiver_global()
                 logger.info("Log receiver cleared")
 
             elif command.endswith("/report_here"):
                 # Set local report receiver
                 self.report_receiver = receiver
-                # Set global report channel
-                self.agent.chat.report_channel = 'zulip'
-                response_text = "✅ Report receiver set to this chat. Progress reports will be sent here."
-                logger.info(f"Report receiver set to: {receiver}, global report channel set to zulip")
+                response_text = self._set_report_receiver_global('zulip', receiver)
+                logger.info(f"Report receiver set to: {receiver}")
 
             elif command.endswith("/stop_report_here"):
                 self.report_receiver = None
-                # Clear global report channel if it was zulip
-                if self.agent.chat.report_channel == 'zulip':
-                    self.agent.chat.report_channel = None
-                response_text = "✅ Report receiver cleared. Reports will be sent to org_manager."
+                response_text = self._clear_report_receiver_global()
                 logger.info("Report receiver cleared")
 
             else:
@@ -195,10 +235,7 @@ class Zulip_Client(Chat_Client):
                 response_text = (
                     f"❓ Unknown command: {command}\n\n"
                     "Available commands:\n"
-                    "/log_here - Set this chat as log receiver\n"
-                    "/stop_log_here - Stop sending logs to this chat\n"
-                    "/report_here - Set this chat as report receiver\n"
-                    "/stop_report_here - Stop sending reports to this chat"
+                    f"{self._available_system_commands_text()}"
                 )
 
             # Send response as reply
@@ -207,7 +244,7 @@ class Zulip_Client(Chat_Client):
         except Exception as e:
             logger.exception(f"Error handling command: {e}")
     
-    def send_message(self, message, receiver=None, subject=None):
+    def send_message(self, message, receiver=None, _type=None):
         """
         Send a message to receiver.
 
@@ -236,15 +273,33 @@ class Zulip_Client(Chat_Client):
                 )
                 return None
 
+            normalized_message = self._normalize_outgoing_message(message)
+            text_parts = []
+            for item in normalized_message:
+                if item['kind'] == 'text':
+                    text_parts.append(item['text'])
+                    continue
+
+                with open(item['abs_path'], 'rb') as file_obj:
+                    upload_result = self.client.upload_file(file_obj)
+                if upload_result.get('result') != 'success':
+                    raise Exception(f'upload_file failed: {upload_result}')
+                upload_uri = upload_result['uri']
+                if item['message_type'] == 'image':
+                    text_parts.append(f'[]({upload_uri})')
+                else:
+                    text_parts.append(f'[{os.path.basename(item["name"])}]({upload_uri})')
+
+            outgoing_content = "\n".join([part for part in text_parts if part])
+
             # Check if receiver has "group:" prefix
             if receiver.startswith("group:"):
-                # Stream message - remove the prefix
-                stream_name = receiver[6:]  # Remove "group:" prefix
+                stream_name, topic = self._decode_stream_receiver(receiver)
                 msg = {
                     'type': 'stream',
                     'to': stream_name,
-                    'subject': subject if subject else 'General',
-                    'content': message,
+                    'subject': topic or _type or 'General',
+                    'content': outgoing_content,
                 }
             else:
                 # Private message to user
@@ -253,7 +308,7 @@ class Zulip_Client(Chat_Client):
                 msg = {
                     'type': 'private',
                     'to': receiver_email,
-                    'content': message,
+                    'content': outgoing_content,
                 }
             result = self.client.send_message(msg)
             if result.get('result') != 'success':
@@ -409,7 +464,7 @@ class Zulip_Client(Chat_Client):
             logger.exception(f'Failed to create stream {stream_name}: {e}', action='create_stream', status='failed')
             raise
 
-    def _send_to_stream(self, stream_name, message, subject="General", description=None):
+    def _send_to_stream(self, stream_name, message, _type="org", description=None):
         """
         Helper method to send a message to a stream, creating it if it doesn't exist.
 
@@ -433,45 +488,8 @@ class Zulip_Client(Chat_Client):
 
         # Send the message
         try:
-            self.send_message(message, receiver=f'group:{stream_name}', subject=subject)
+            self.send_message(message, receiver=f'group:{stream_name}', _type=_type)
             logger.debug(f'Message sent to stream: {stream_name}', action='_send_to_stream', status='success')
         except Exception as e:
             logger.exception(f'Failed to send message to stream {stream_name}: {e}')
             raise
-
-    def send_to_org(self, message, subject="General"):
-        """
-        Sends a message to the organization stream.
-        Creates the stream if it doesn't exist.
-
-        Args:
-            message: Message content to send
-            subject: Subject/topic for the message (default: "General")
-        """
-        stream_name = f'{self.agent.org_name}'
-        description = f"Organization stream of {self.agent.org_name}"
-        self._send_to_stream(stream_name, message, subject, description)
-
-    def send_to_log(self, message, subject="Log"):
-        """
-        Sends a message to the self-reporting stream.
-        If log_receiver is set, sends to that receiver instead.
-
-        Args:
-            message: Message content to send
-            subject: Subject/topic for the message (default: "Log")
-        """
-        if self._manager_only_enabled() and self.org_manager_email:
-            self.send_message(message, receiver=self.org_manager_email, subject=subject)
-            return
-        if self.log_receiver is None:
-            # Default behavior: send to agent's self-reporting stream
-            stream_name = f'{self.agent.name}'
-            description = f"Self-reporting stream of {self.agent.name}"
-            self._send_to_stream(stream_name, message, subject, description)
-        else:
-            # Send to the configured log receiver
-            try:
-                self.send_message(message, receiver=self.log_receiver, subject=subject)
-            except Exception as e:
-                logger.exception(f'Error sending to log receiver: {e}')

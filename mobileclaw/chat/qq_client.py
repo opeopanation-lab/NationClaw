@@ -2,6 +2,7 @@
 The QQ chat client implementation.
 """
 import asyncio
+import base64
 from collections import deque
 from threading import Thread
 import structlog
@@ -137,11 +138,13 @@ class QQ_Client(Chat_Client):
             if not content:
                 return
 
-            self._set_org_manager_if_missing(
+            org_manager_set = self._set_org_manager_if_missing(
                 'org_manager_user_id',
                 'chat_qq_org_manager',
                 user_id,
             )
+            if org_manager_set and self._should_send_system_message():
+                await self._async_send_message(self._org_manager_status_text(), user_id)
 
             # Handle commands (only from org_manager)
             if content.startswith('/') and user_id == self.org_manager_user_id:
@@ -149,6 +152,12 @@ class QQ_Client(Chat_Client):
                 return
             if not self._should_handle_incoming(user_id, self.org_manager_user_id, logger=logger, channel='qq'):
                 return
+            if (
+                not self._is_command_message(content)
+                and self._ensure_report_receiver_global('qq', user_id)
+                and self._should_send_system_message()
+            ):
+                await self._async_send_message(self._receiver_status_text('report', True), user_id)
 
             # Store chat_id for replies
             self._chat_id_mapping[user_id] = user_id
@@ -188,32 +197,22 @@ class QQ_Client(Chat_Client):
         try:
             if command.endswith("/log_here"):
                 self.log_receiver = user_id
-                # Set global log channel
-                self.agent.chat.log_channel = 'qq'
-                response_text = "✅ Log receiver set. Logs will be sent to you."
-                logger.info(f"Log receiver set to user_id: {user_id}, global log channel set to qq")
+                response_text = self._set_log_receiver_global('qq', user_id)
+                logger.info(f"Log receiver set to user_id: {user_id}")
 
             elif command.endswith("/stop_log_here"):
                 self.log_receiver = None
-                # Clear global log channel if it was qq
-                if self.agent.chat.log_channel == 'qq':
-                    self.agent.chat.log_channel = None
-                response_text = "✅ Log receiver cleared. Logs will no longer be sent."
+                response_text = self._clear_log_receiver_global()
                 logger.info("Log receiver cleared")
 
             elif command.endswith("/report_here"):
                 self.report_receiver = user_id
-                # Set global report channel
-                self.agent.chat.report_channel = 'qq'
-                response_text = "✅ Report receiver set. Progress reports will be sent to you."
-                logger.info(f"Report receiver set to user_id: {user_id}, global report channel set to qq")
+                response_text = self._set_report_receiver_global('qq', user_id)
+                logger.info(f"Report receiver set to user_id: {user_id}")
 
             elif command.endswith("/stop_report_here"):
                 self.report_receiver = None
-                # Clear global report channel if it was qq
-                if self.agent.chat.report_channel == 'qq':
-                    self.agent.chat.report_channel = None
-                response_text = "✅ Report receiver cleared. Reports will be sent to org_manager."
+                response_text = self._clear_report_receiver_global()
                 logger.info("Report receiver cleared")
 
             else:
@@ -221,10 +220,7 @@ class QQ_Client(Chat_Client):
                 response_text = (
                     f"❓ Unknown command: {command}\n\n"
                     "Available commands:\n"
-                    "/log_here - Set as log receiver\n"
-                    "/stop_log_here - Stop receiving logs\n"
-                    "/report_here - Set as report receiver\n"
-                    "/stop_report_here - Stop receiving reports"
+                    f"{self._available_system_commands_text()}"
                 )
 
             # Send response
@@ -244,7 +240,7 @@ class QQ_Client(Chat_Client):
         except Exception as e:
             logger.debug(f"Error sending text message: {e}")
 
-    def send_message(self, message, receiver=None, subject=None):
+    def send_message(self, message, receiver=None, _type=None):
         """Send a message to a user."""
         if not self._client:
             logger.warning('QQ client not initialized')
@@ -266,20 +262,49 @@ class QQ_Client(Chat_Client):
 
         try:
             # Run async operation in thread-safe way
+            normalized_message = self._normalize_outgoing_message(message)
             if self._loop and self._loop.is_running():
-                asyncio.run_coroutine_threadsafe(
-                    self._async_send_message(message, receiver),
-                    self._loop
-                ).result(timeout=10)
+                for item in normalized_message:
+                    coro = (
+                        self._async_send_message(item['text'], receiver)
+                        if item['kind'] == 'text'
+                        else self._async_send_attachment(item, receiver)
+                    )
+                    asyncio.run_coroutine_threadsafe(coro, self._loop).result(timeout=10)
             else:
                 # Fallback: create new event loop
                 loop = asyncio.new_event_loop()
                 try:
-                    loop.run_until_complete(self._async_send_message(message, receiver))
+                    for item in normalized_message:
+                        coro = (
+                            self._async_send_message(item['text'], receiver)
+                            if item['kind'] == 'text'
+                            else self._async_send_attachment(item, receiver)
+                        )
+                        loop.run_until_complete(coro)
                 finally:
                     loop.close()
         except Exception as e:
             logger.exception(f'Error sending QQ message: {e}')
+
+    async def _async_send_attachment(self, item, receiver):
+        """Async helper to send attachment."""
+        try:
+            if hasattr(self._client.api, 'post_c2c_base64file'):
+                file_type = 1 if item['message_type'] == 'image' else 4
+                with open(item['abs_path'], 'rb') as file_obj:
+                    encoded = base64.b64encode(file_obj.read()).decode('utf-8')
+                await self._client.api.post_c2c_base64file(
+                    openid=receiver,
+                    file_type=file_type,
+                    file_data=encoded,
+                    srv_send_msg=True,
+                )
+            else:
+                await self._async_send_message(f"[{item['message_type']}: {item['rel_path']}]", receiver)
+        except Exception as e:
+            logger.error(f'Error in async attachment send: {e}')
+            raise
 
     async def _async_send_message(self, message, receiver):
         """Async helper to send message."""
@@ -301,30 +326,6 @@ class QQ_Client(Chat_Client):
             self.send_message(content, receiver=sender)
         else:
             logger.warning('Cannot reply: no sender in previous message')
-
-    def send_to_org(self, message, subject="General"):
-        """Send a message to the organization manager."""
-        if self.org_manager_user_id:
-            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
-        else:
-            logger.warning('No org manager configured for QQ')
-
-    def send_to_log(self, message, subject="Log"):
-        """
-        Send a message to the log receiver.
-        If log_receiver is not set, returns without sending.
-        """
-        if self._manager_only_enabled() and self.org_manager_user_id:
-            self.send_message(message, receiver=self.org_manager_user_id, subject=subject)
-            return
-        if self.log_receiver is None:
-            logger.debug('No log receiver set, skipping send_to_log')
-            return
-
-        try:
-            self.send_message(message, receiver=self.log_receiver, subject=subject)
-        except Exception as e:
-            logger.exception(f'Error sending to log receiver: {e}')
 
     def get_history_messages(self, msg, max_previous_messages=100):
         """Get message history. Returns empty list as QQ API doesn't provide easy history access."""

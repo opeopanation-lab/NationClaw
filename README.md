@@ -4,8 +4,9 @@
 
 [![中文文档](https://img.shields.io/badge/中文文档-README__zh.md-0f766e?style=flat-square)](README_zh.md)
 ![English](https://img.shields.io/badge/English-Current-2563eb?style=flat-square)
-[![Website](https://img.shields.io/badge/Website-mobileclaw.github.io-7c3aed?style=flat-square)](https://mobileclaw.github.io/)
-[![Android App](https://img.shields.io/badge/Android%20App-Download-16a34a?style=flat-square)](https://github.com/MobileClaw/MobileClaw/releases/latest/download/MobileClaw.apk)
+[![Website](https://img.shields.io/badge/Website-mobileclaw.cc-7c3aed?style=flat-square)](https://mobileclaw.cc/)
+[![Android App](https://img.shields.io/badge/Android%20App-Download-16a34a?style=flat-square)](https://mobileclaw.cc/files/MobileClaw.apk)
+[![X](https://img.shields.io/badge/X-@MobileClawX-111111?style=flat-square)](https://x.com/MobileClawX)
 [![News](https://img.shields.io/badge/News-Latest-f59e0b?style=flat-square)](#news)
 
 </div>
@@ -32,11 +33,11 @@ Unlike existing coding agents based on low-level system commands, third-party AP
 
 ## Highlights
 
-- 📱 Natively built for mobile devices (e.g. Android).
-- 👀 Human-like interaction with apps via vision/GUI.
-- 🪶 Lightweight design with minimal third-party service integration.
-- 📝 Memory and skills organized as `.md` files, like other *claw*s.
-- 💬 Communication with users via daily messaging apps (Telegram, Weixin, etc.).
+- Natively built for mobile devices (e.g. Android).
+- Human-like interaction with apps via vision/GUI.
+- Lightweight design with minimal third-party service integration.
+- Memory and skills organized as `.md` files, like other *claw*s.
+- Communication with users via daily messaging apps (Telegram, Weixin, etc.).
 
 > [!IMPORTANT]
 > - To avoid security risks, please **DO NOT** use MobileClaw to control your main device.
@@ -44,19 +45,19 @@ Unlike existing coding agents based on low-level system commands, third-party AP
 
 ## News
 
-- 🚀 2026.03.27 MobileClaw app v0.3.3 released.
-- ✨ 2026.03.26 Added support for Weixin chat channel.
-- 🌱 2026.02.08 Project kick-off.
+- 2026.03.27 MobileClaw app v0.3.3 released.
+- 2026.03.26 Added support for Weixin chat channel.
+- 2026.02.08 Project kick-off.
 
 ## Getting Started
 
 ### For users
 
-- Download and install the [MobileClaw Android app](https://github.com/MobileClaw/MobileClaw/releases/latest/download/MobileClaw.apk).
+- Download and install the [MobileClaw Android app](https://mobileclaw.cc/files/MobileClaw.apk).
 - Complete the model/chat configurations.
 - Click the start button and enjoy.
 
-Visit our [project website](https://mobileclaw.github.io) for details.
+Visit our [project website](https://mobileclaw.cc/) for details.
 
 ### For developers
 
@@ -97,6 +98,7 @@ For example, the following lines in `config.yaml` set the foundation model to `g
 custom_fm_url: "https://api.openai.com/v1/chat/completions"
 custom_fm_key: "sk-xxx"
 custom_fm_name: "gpt-5.2-chat"
+tavily_api_key: "tvly-xxx"  # optional, enables Tavily web search
 ```
 
 ## Chat App Configuration
@@ -124,7 +126,7 @@ default_chat_channel: zulip
 ```
 
 <details>
-<summary><strong>Telegram</strong></summary>
+<summary>Telegram</summary>
 
 **1. Create a bot**
 - Open Telegram, search `@BotFather`
@@ -141,7 +143,7 @@ chat_telegram_proxy: http://proxy:port  # Optional; if you need a proxy
 </details>
 
 <details>
-<summary><strong>Weixin</strong></summary>
+<summary>Weixin</summary>
 
 **1. Prepare the iLink bot API**
 - Make sure your Weixin bot account can access the iLink HTTP API
@@ -162,11 +164,11 @@ chat_weixin_bot_token: YOUR_BOT_TOKEN  # Optional; omit to use QR login
 </details>
 
 <details>
-<summary><strong>Lark/Feishu</strong></summary>
+<summary>Lark/Feishu</summary>
 
 **1. Create a Lark bot**
 - Visit [Feishu Open Platform](https://open.feishu.cn/app)
-- Create a new app → Enable **Bot** capability
+- Create a new app -> Enable **Bot** capability
 - Get **App ID** and **App Secret** from "Credentials & Basic Info"
 - Grant following permissions to the bot:
   - im:message.group_msg
@@ -189,7 +191,7 @@ chat_lark_org_manager: ou_xxx  # Optional; your Lark open_id or phone number. If
 </details>
 
 <details>
-<summary><strong>QQ</strong></summary>
+<summary>QQ</summary>
 
 **1. Create a QQ bot**
 - Visit [QQ Open Platform](https://q.qq.com)
@@ -206,7 +208,7 @@ chat_qq_org_manager: YOUR_USER_OPENID  # Your QQ user openid
 </details>
 
 <details>
-<summary><strong>Zulip</strong></summary>
+<summary>Zulip</summary>
 
 **1. Create a Zulip bot**
 - Go to your Zulip organization settings
@@ -225,11 +227,11 @@ chat_zulip_org_manager: manager@example.com  # Org manager's zulip email. Defaul
 </details>
 
 <details>
-<summary><strong>Discord</strong></summary>
+<summary>Discord</summary>
 
 **1. Create a Discord bot**
 - Visit the [Discord Developer Portal](https://discord.com/developers/applications)
-- Create a new application → Add a bot
+- Create a new application -> Add a bot
 - Copy the bot token
 - Enable the bot intents needed for messages, especially **Message Content Intent**
 - Invite the bot to your server or DM it directly
@@ -243,7 +245,7 @@ chat_discord_org_manager: YOUR_USER_ID  # Your Discord user ID
 </details>
 
 <details>
-<summary><strong>WhatsApp</strong></summary>
+<summary>WhatsApp</summary>
 
 **1. Start the WhatsApp bridge**
 - MobileClaw's WhatsApp client connects to a local Node.js WebSocket bridge
@@ -259,11 +261,11 @@ chat_whatsapp_org_manager: YOUR_PHONE_OR_SENDER_ID  # Usually phone number witho
 </details>
 
 <details>
-<summary><strong>Slack</strong></summary>
+<summary>Slack</summary>
 
 **1. Create a Slack app**
 - Visit [Slack API Apps](https://api.slack.com/apps)
-- Create a new app → Enable **Socket Mode**
+- Create a new app -> Enable **Socket Mode**
 - Create an app-level token with `connections:write`
 - Add a bot token with the permissions your workspace needs for messaging
 - Install the app to your workspace and copy both tokens

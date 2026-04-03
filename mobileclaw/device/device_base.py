@@ -45,7 +45,7 @@ class DeviceControllerBase(UniInterface):
     def __str__(self) -> str:
         return f"Device Interface: {self.device_name}"
 
-    def execute_task(self, task: str, max_steps: int = 15, keep_recent_images: int = 3):
+    def execute_task(self, task: str, max_steps: int = 6, keep_recent_images: int = 3):
         """
         Execute a device control task using iterative LLM-generated Python code.
 
@@ -107,34 +107,45 @@ class DeviceControllerBase(UniInterface):
                     self.agent._log_and_report('Device task interrupted because agent is stopping.', actions_and_results, task_tag=task_tag)
                     break
 
-            # Take screenshot
-            screenshot = self.take_screenshot()
-
-            model_screenshot, scale_x, scale_y = self._prepare_screenshot_for_model(screenshot)
-            self._last_model_input_scale_x = scale_x
-            self._last_model_input_scale_y = scale_y
-
-            # Save screenshot to temp file and convert to base64
-            img_byte_arr = BytesIO()
-            model_screenshot.save(img_byte_arr, format='PNG')
-            img_bytes = img_byte_arr.getvalue()
-            screenshot_base64 = base64.b64encode(img_bytes).decode('utf-8')
-            img_byte_arr.close()
-
+            screenshot = None
+            model_screenshot = None
+            screenshot_base64 = None
+            screen_path = None
+            screenshot_error = None
             try:
-                screenshots_dir = os.path.join(self.agent.file.agent_temp_dir, 'screenshots')
-                os.makedirs(screenshots_dir, exist_ok=True)
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"device_step_{step}_{timestamp}.png"
-                filepath = os.path.join(screenshots_dir, filename)
-                screenshot.save(filepath, format='PNG')
-                screen_path = os.path.relpath(filepath, self.agent.file.agent_dir)
-            except Exception as e:
-                logger.warning(f"Failed to save screenshot to file: {e}")
-                screen_path = f"device_step_{step}_{datetime.now().strftime('%H%M%S')}"
+                screenshot = self.take_screenshot()
+                model_screenshot, scale_x, scale_y = self._prepare_screenshot_for_model(screenshot)
+                self._last_model_input_scale_x = scale_x
+                self._last_model_input_scale_y = scale_y
 
-            screenshots.append((screen_path, screenshot_base64))
-            self.agent._log_and_report(f'Step {step} Screen: {screen_path}', actions_and_results, task_tag=task_tag)
+                img_byte_arr = BytesIO()
+                model_screenshot.save(img_byte_arr, format='PNG')
+                img_bytes = img_byte_arr.getvalue()
+                screenshot_base64 = base64.b64encode(img_bytes).decode('utf-8')
+                img_byte_arr.close()
+
+                try:
+                    screenshots_dir = os.path.join(self.agent.file.agent_temp_dir, 'screenshots')
+                    os.makedirs(screenshots_dir, exist_ok=True)
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f"device_step_{step}_{timestamp}.png"
+                    filepath = os.path.join(screenshots_dir, filename)
+                    model_screenshot.save(filepath, format='PNG')
+                    screen_path = os.path.relpath(filepath, self.agent.file.agent_dir)
+                except Exception as e:
+                    logger.warning(f"Failed to save screenshot to file: {e}")
+                    screen_path = f"device_step_{step}_{datetime.now().strftime('%H%M%S')}"
+
+                screenshots.append((screen_path, screenshot_base64))
+                self.agent._log_and_report(f'Step {step} Screen: {screen_path}', actions_and_results, task_tag=task_tag)
+            except Exception as e:
+                screenshot_error = str(e)
+                logger.warning(f"Failed to capture screenshot at step {step}: {screenshot_error}")
+                self.agent._log_and_report(
+                    f'Step {step} Screenshot Error: {screenshot_error}. You may try `device.back()` or `device.home()` to switch to another screen before retrying.',
+                    actions_and_results,
+                    task_tag=task_tag
+                )
 
             # Build images from most recent step screenshots and note screenshots
             recent_screens = screenshots[-(keep_recent_images):] if keep_recent_images > 0 else screenshots
@@ -150,6 +161,7 @@ class DeviceControllerBase(UniInterface):
                 'device_type': device_type,
                 'current_screen': screenshot_base64,
                 'images': images,
+                'screenshot_error': screenshot_error,
             }
 
             # Call device_use_step API
@@ -160,7 +172,8 @@ class DeviceControllerBase(UniInterface):
                 break
 
             # Store screenshot in actions_and_results for history
-            actions_and_results.append((screen_path, screenshot_base64))
+            if screen_path and screenshot_base64:
+                actions_and_results.append((screen_path, screenshot_base64))
 
             # Add thought to results
             if thought:
@@ -206,8 +219,9 @@ class DeviceControllerBase(UniInterface):
         # Take a final screenshot and add to results
         try:
             final_screenshot = self.take_screenshot()
+            final_model_screenshot, _, _ = self._prepare_screenshot_for_model(final_screenshot)
             img_byte_arr = BytesIO()
-            final_screenshot.save(img_byte_arr, format='PNG')
+            final_model_screenshot.save(img_byte_arr, format='PNG')
             final_base64 = base64.b64encode(img_byte_arr.getvalue()).decode('utf-8')
             img_byte_arr.close()
 
@@ -215,7 +229,7 @@ class DeviceControllerBase(UniInterface):
             os.makedirs(screenshots_dir, exist_ok=True)
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filepath = os.path.join(screenshots_dir, f"device_final_{timestamp}.png")
-            final_screenshot.save(filepath, format='PNG')
+            final_model_screenshot.save(filepath, format='PNG')
             final_path = os.path.relpath(filepath, self.agent.file.agent_dir)
 
             screenshots.append((final_path, final_base64))
@@ -268,6 +282,10 @@ class DeviceControllerBase(UniInterface):
                 """Type text content"""
                 return self._device.view_set_text(content)
 
+            def type(self, content):
+                """Type text into the active input field"""
+                return self._device.view_set_text(content)
+
             def enter(self):
                 """Press Enter key"""
                 return self._device.enter()
@@ -286,6 +304,12 @@ class DeviceControllerBase(UniInterface):
                 scaled_x2, scaled_y2 = self._device._scale_coordinates_if_needed(end_xy[0], end_xy[1])
                 return self._device.drag((scaled_x1, scaled_y1), (scaled_x2, scaled_y2))
 
+            def swipe(self, start_xy, end_xy):
+                """Swipe from start_xy to end_xy"""
+                scaled_x1, scaled_y1 = self._device._scale_coordinates_if_needed(start_xy[0], start_xy[1])
+                scaled_x2, scaled_y2 = self._device._scale_coordinates_if_needed(end_xy[0], end_xy[1])
+                return self._device.drag((scaled_x1, scaled_y1), (scaled_x2, scaled_y2))
+
             def back(self):
                 """Go back"""
                 return self._device.back()
@@ -293,6 +317,11 @@ class DeviceControllerBase(UniInterface):
             def home(self):
                 """Go to home"""
                 return self._device.home()
+            
+            def wait(self):
+                """Wait a little bit time"""
+                time.sleep(0.5)
+                return None
 
             def start_app(self, app_name):
                 """Start an application"""
@@ -585,12 +614,20 @@ class DeviceControllerBase(UniInterface):
         )
         return resized, resized_width / original_width, resized_height / original_height
 
-    def _is_scaled_coordinate_model(self) -> bool:
-        mode = getattr(self.agent.config, 'gui_coordinate_scale_mode', 'auto')
-        if mode == 'always':
-            return True
+    def _get_coordinate_mode(self) -> str:
+        mode = str(getattr(self.agent.config, 'gui_coordinate_scale_mode', 'auto') or 'auto').strip().lower()
         if mode == 'never':
-            return False
+            return 'image_pixels'
+        if mode == 'always':
+            return 'scale_1000'
+        if mode.startswith('scale_'):
+            scale_value = mode[len('scale_'):]
+            try:
+                parsed_value = float(scale_value)
+                if parsed_value > 0:
+                    return f'scale_{parsed_value}'
+            except ValueError:
+                logger.warning(f"Invalid gui_coordinate_scale_mode: {mode}, fallback to auto")
 
         gui_vlm_name = ''
         if getattr(self.agent.config, 'use_custom_gui_vlm', False):
@@ -599,9 +636,13 @@ class DeviceControllerBase(UniInterface):
             gui_vlm_name = getattr(self.agent.config, 'wisewk_gui_vlm_name', '') or ''
 
         gui_vlm_name = gui_vlm_name.lower()
-        return 'seed' in gui_vlm_name
+        if gui_vlm_name.startswith('kimi'):
+            return 'scale_1'
+        if 'seed' in gui_vlm_name:
+            return 'scale_1000'
+        return 'image_pixels'
 
-    def _scale_coordinates_if_needed(self, x: int, y: int) -> tuple:
+    def _scale_coordinates_if_needed(self, x: int | float, y: int | float) -> tuple:
         """
         Restore model coordinates to actual device dimensions.
 
@@ -618,15 +659,15 @@ class DeviceControllerBase(UniInterface):
             logger.error(f"Invalid device dimensions (width={device_width}, height={device_height}), using original coordinates")
             return (0, 0)
 
-        if self._is_scaled_coordinate_model():
-            model_width = 1000
-            model_height = 1000
-            scale_x = device_width / model_width
-            scale_y = device_height / model_height
-            scaled_x = int(x * scale_x)
-            scaled_y = int(y * scale_y)
+        coordinate_mode = self._get_coordinate_mode()
+
+        if coordinate_mode.startswith('scale_'):
+            scale_range = float(coordinate_mode[len('scale_'):])
+            scaled_x = int(float(x) / scale_range * device_width)
+            scaled_y = int(float(y) / scale_range * device_height)
             logger.debug(
-                f"Seed coordinate scaling: ({x}, {y}) -> ({scaled_x}, {scaled_y}) (device: {device_width}x{device_height})"
+                f"Scaled coordinates ({scale_range} range): ({x}, {y}) -> ({scaled_x}, {scaled_y}) "
+                f"(device: {device_width}x{device_height})"
             )
         else:
             input_scale_x = getattr(self, '_last_model_input_scale_x', 1.0) or 1.0
@@ -743,7 +784,7 @@ class DeviceControllerBase(UniInterface):
         """通知用户截图为黑屏，并请求手动接管"""
         try:
             # 根据任务语言选择消息
-            task_language = getattr(self.agent, 'task_language', 'zh')
+            task_language = getattr(self.agent, 'task_language', 'en')
             if task_language == 'en':
                 message = f'The screen captured from device "{self.device_name}" is black. The device may be in a privacy protection screen, and the task execution may encounter errors. Please manually handle it and click "Takeover Ended" when done.'
             else:
