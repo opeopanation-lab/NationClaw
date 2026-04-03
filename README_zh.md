@@ -2,12 +2,10 @@
 
 <div align="center">
 
-![中文文档](https://img.shields.io/badge/中文文档-当前版本-0f766e?style=flat-square)
 [![English](https://img.shields.io/badge/English-README.md-2563eb?style=flat-square)](README.md)
 [![Website](https://img.shields.io/badge/Website-mobileclaw.cc-7c3aed?style=flat-square)](https://mobileclaw.cc/)
 [![Android App](https://img.shields.io/badge/Android%20App-下载-16a34a?style=flat-square)](https://mobileclaw.cc/files/MobileClaw.apk)
 [![X](https://img.shields.io/badge/X-@MobileClawX-111111?style=flat-square)](https://x.com/MobileClawX)
-[![News](https://img.shields.io/badge/News-最新动态-f59e0b?style=flat-square)](#动态)
 
 </div>
 
