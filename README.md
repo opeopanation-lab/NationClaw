@@ -3,11 +3,9 @@
 <div align="center">
 
 [![中文文档](https://img.shields.io/badge/中文文档-README__zh.md-0f766e?style=flat-square)](README_zh.md)
-![English](https://img.shields.io/badge/English-Current-2563eb?style=flat-square)
 [![Website](https://img.shields.io/badge/Website-mobileclaw.cc-7c3aed?style=flat-square)](https://mobileclaw.cc/)
 [![Android App](https://img.shields.io/badge/Android%20App-Download-16a34a?style=flat-square)](https://mobileclaw.cc/files/MobileClaw.apk)
 [![X](https://img.shields.io/badge/X-@MobileClawX-111111?style=flat-square)](https://x.com/MobileClawX)
-[![News](https://img.shields.io/badge/News-Latest-f59e0b?style=flat-square)](#news)
 
 </div>
 
