@@ -1,6 +1,6 @@
 # MobileClaw - 全自主移动智能体
 
-[[English](README.md)] | [中文文档]
+[[English](README.md)] | [中文文档] | [[X（Twitter）]](https://x.com/MobileClawX)
 
 <div align="center">
   <img src="_res/brand.png" alt="mobileclaw" width="600">
@@ -28,6 +28,8 @@ MobileClaw 的使命是在移动设备（例如你的备用手机）上实现类
 - 我们强烈建议在 MobileClaw 控制的设备上使用**独立的应用账号**，且**不要**滥用互联网服务。
 
 ## 安装方法
+
+Android APK 下载地址：[MobileClaw.apk](https://mobileclaw.cc/files/MobileClaw.apk)
 
 1. 克隆本项目。
 2. 运行 `cd MobileClaw` 和 `pip install -e .`

@@ -125,9 +125,9 @@ class AutoAgent:
     def _adaptive_sleep(self):
         """Adaptive sleep based on idle task count.
         Sleep time increases exponentially with consecutive idle tasks,
-        up to a maximum of 10 minutes (600 seconds).
+        up to a maximum of 30 minutes (1800 seconds).
         """
-        sleep_time = min(2 ** self._idle_task_count, 600)
+        sleep_time = min(3 ** self._idle_task_count, 1800)
         self._sleep(sleep_time)
 
     def serve(self):
@@ -310,9 +310,9 @@ class AutoAgent:
                   - 'conclude_task': Save task information to knowledge and memory files
         """
         # Prevent infinite recursion
-        if _recursion_depth >= 3:
+        if _recursion_depth >= 6:
             logger.warning(f"Maximum recursion depth reached for task: {task}")
-            return [f"Error: Maximum recursion depth (3) reached. Cannot execute subtask: {task}"]
+            return [f"Error: Maximum recursion depth (6) reached. Cannot execute subtask: {task}"]
 
         # Generate a random emoji as task tag
         task_emojis = ['🔴', '🟠', '🟡', '🟢', '🔵', '🟣', '🟤', '⚫', '⚪',
@@ -978,6 +978,12 @@ Task: {current_task}
                 self._agent_api._capture_result('file.replace', result)
                 return result
 
+            def edit(self, file_path, edits):
+                self._check_and_count()
+                result = self._file.edit(file_path, edits)
+                self._agent_api._capture_result('file.edit', result)
+                return result
+
             def delete(self, file_path):
                 self._check_and_count()
                 result = self._file.delete(file_path)
@@ -988,18 +994,6 @@ Task: {current_task}
                 self._check_and_count()
                 result = self._file.remove_lines(file_path, line_start, line_end)
                 self._agent_api._capture_result('file.remove_lines', result)
-                return result
-
-            def parse_file(self, file_path):
-                self._check_and_count()
-                result = self._file.parse_file(file_path)
-                self._agent_api._capture_result('file.parse_file', result)
-                return result
-
-            def generate_file(self, file_path, requirement, materials):
-                self._check_and_count()
-                result = self._file.generate_file(file_path, requirement, materials)
-                self._agent_api._capture_result('file.generate_file', result)
                 return result
 
         class AgentAPI:
@@ -1057,7 +1051,7 @@ Task: {current_task}
                 """Capture a text result, saving to temp file if too large."""
                 result_str = str(result)
                 formatted_result = result_str
-                block_wrapped_apis = {'file.read', 'file.search', 'query_model', 'file.parse_file', 'infer_from_last_trajectory', 'do_with_device'}
+                block_wrapped_apis = {'file.read', 'file.search', 'file.edit', 'read_document', 'query_model', 'infer_from_last_trajectory', 'do_with_device'}
                 if api_name in block_wrapped_apis and result_str:
                     formatted_result = f"```text\n{result_str}\n```"
                 should_inline_full = api_name == 'file.read'
@@ -1226,5 +1220,24 @@ Task: {current_task}
                 result_text = f'Image loaded: {rel_path}'
                 self._log_output(result_text)
                 self._log_output((rel_path, base64_str))
+
+            def read_document(self, document_path):
+                """Read a document file as markdown-like text and include it in the next step's context.
+
+                Args:
+                    document_path: Relative path (from agent dir) or absolute path to the document file.
+                """
+                self._check_call_count()
+                result = self._agent.file.read_document(document_path)
+                if isinstance(result, list):
+                    rel_path = document_path
+                    if os.path.isabs(document_path):
+                        rel_path = os.path.relpath(document_path, self._agent.file.agent_dir)
+                    result_text = f"Document loaded: {rel_path}"
+                    self._log_output(result_text)
+                    self._capture_result('read_document', result)
+                    return result
+                self._capture_result('read_document', result)
+                return result
 
         return AgentAPI(self, actions_and_results, recursion_depth, mode, task_tag, indent)

@@ -18,6 +18,7 @@ tavily_api_key: ?  # optional Tavily search API key
 root_dir: (path to root dir)
 name: (name of your bot)
 save_query_for_debug: false
+temp_file_retention_days: 1
 log_level: 20   # Info
 
 chat_channels: zulip,lark

@@ -178,7 +178,7 @@ class Slack_Client(Chat_Client):
             'chat_slack_org_manager',
             sender_id,
         )
-        if org_manager_set and self._web_client:
+        if org_manager_set and self._web_client and self._should_send_system_message():
             try:
                 await self._web_client.chat_postMessage(channel=chat_id, text=self._org_manager_status_text(), thread_ts=thread_ts)
             except Exception as e:
@@ -208,7 +208,12 @@ class Slack_Client(Chat_Client):
             return
         if not self._should_handle_incoming(sender_id, self.org_manager_user_id, logger=logger, channel='slack'):
             return
-        if not self._is_command_message(text) and self._ensure_report_receiver_global('slack', chat_id) and self._web_client:
+        if (
+            not self._is_command_message(text)
+            and self._ensure_report_receiver_global('slack', chat_id)
+            and self._web_client
+            and self._should_send_system_message()
+        ):
             try:
                 await self._web_client.chat_postMessage(channel=chat_id, text=self._receiver_status_text('report', True), thread_ts=thread_ts)
             except Exception as e:

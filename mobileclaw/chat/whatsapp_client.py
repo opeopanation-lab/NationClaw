@@ -128,7 +128,7 @@ class WhatsApp_Client(Chat_Client):
                 'chat_whatsapp_org_manager',
                 sender_id,
             )
-            if org_manager_set:
+            if org_manager_set and self._should_send_system_message():
                 await self._async_send(self._org_manager_status_text(), sender)
 
             content_parts = [content] if content else []
@@ -160,7 +160,11 @@ class WhatsApp_Client(Chat_Client):
                 return
             if not self._should_handle_incoming(sender_id, self.org_manager_user_id, logger=logger, channel='whatsapp'):
                 return
-            if not self._is_command_message(content) and self._ensure_report_receiver_global('whatsapp', sender):
+            if (
+                not self._is_command_message(content)
+                and self._ensure_report_receiver_global('whatsapp', sender)
+                and self._should_send_system_message()
+            ):
                 await self._async_send(self._receiver_status_text('report', True), sender)
 
             # Call agent's message handler

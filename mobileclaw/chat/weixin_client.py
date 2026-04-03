@@ -229,27 +229,31 @@ class Weixin_Client(Chat_Client):
 
     def _poll_updates_forever(self):
         while not self._stop_serving and self.bot_token:
-            timeout_sec = max(int(self._longpolling_timeout_ms / 1000), 35)
-            data = self._api_post(
-                'ilink/bot/getupdates',
-                {
-                    'get_updates_buf': self._get_updates_buf,
-                    'base_info': {'channel_version': WEIXIN_CHANNEL_VERSION},
-                },
-                timeout=timeout_sec,
-                session=self._poll_session,
-            )
+            try:
+                timeout_sec = max(int(self._longpolling_timeout_ms / 1000), 35)
+                data = self._api_post(
+                    'ilink/bot/getupdates',
+                    {
+                        'get_updates_buf': self._get_updates_buf,
+                        'base_info': {'channel_version': WEIXIN_CHANNEL_VERSION},
+                    },
+                    timeout=timeout_sec,
+                    session=self._poll_session,
+                )
 
-            new_buf = data.get('get_updates_buf')
-            if new_buf is not None:
-                self._get_updates_buf = new_buf
-            self._longpolling_timeout_ms = data.get('longpolling_timeout_ms') or self._longpolling_timeout_ms
+                new_buf = data.get('get_updates_buf')
+                if new_buf is not None:
+                    self._get_updates_buf = new_buf
+                self._longpolling_timeout_ms = data.get('longpolling_timeout_ms') or self._longpolling_timeout_ms
 
-            for message in data.get('msgs') or []:
-                try:
-                    self._handle_inbound_message(message)
-                except Exception as e:
-                    logger.exception(f'Failed to handle Weixin inbound message: {e}')
+                for message in data.get('msgs') or []:
+                    try:
+                        self._handle_inbound_message(message)
+                    except Exception as e:
+                        logger.exception(f'Failed to handle Weixin inbound message: {e}')
+            except Exception as e:
+                logger.exception(f'Weixin getupdates failed: {e}')
+                time.sleep(2)
 
     def _handle_inbound_message(self, message):
         from_user_id = message.get('from_user_id')
@@ -261,16 +265,26 @@ class Weixin_Client(Chat_Client):
         self._remember_route(receiver_key, message)
 
         org_manager_set = self._set_org_manager_if_missing(from_user_id)
-        if org_manager_set:
-            self.send_message(self._org_manager_status_text(), receiver=from_user_id)
+        if org_manager_set and self._should_send_system_message():
+            try:
+                self.send_message(self._org_manager_status_text(), receiver=from_user_id)
+            except Exception as e:
+                logger.warning(f'Failed to send Weixin manager status message: {e}')
         content = self._extract_message_content(message)
         if not content:
             logger.debug('Skipping unsupported Weixin message without text content')
             return
         if not self._should_handle_incoming(from_user_id, self.org_manager_user_id, logger=logger, channel='weixin'):
             return
-        if not self._is_command_message(content) and self._ensure_report_receiver_global('weixin', receiver_key):
-            self.send_message(self._receiver_status_text('report', True), receiver=receiver_key)
+        if (
+            not self._is_command_message(content)
+            and self._ensure_report_receiver_global('weixin', receiver_key)
+            and self._should_send_system_message()
+        ):
+            try:
+                self.send_message(self._receiver_status_text('report', True), receiver=receiver_key)
+            except Exception as e:
+                logger.warning(f'Failed to send Weixin report status message: {e}')
         history_messages = self.get_history_messages(receiver_key)
         history = "\n".join([f'[{m[2]}] {m[0]}: {m[1]}' for m in history_messages])
         sender_name = receiver_key
@@ -282,12 +296,26 @@ class Weixin_Client(Chat_Client):
             return
 
         if hasattr(self.agent, 'handle_message'):
-            self.agent.handle_message(
+            self._dispatch_agent_message(
                 message=content,
                 history=history,
                 sender=sender_name,
                 channel='weixin',
             )
+
+    def _dispatch_agent_message(self, message, history, sender, channel):
+        def runner():
+            try:
+                self.agent.handle_message(
+                    message=message,
+                    history=history,
+                    sender=sender,
+                    channel=channel,
+                )
+            except Exception as e:
+                logger.exception(f'Weixin agent.handle_message failed: {e}')
+
+        threading.Thread(target=runner, daemon=True).start()
 
     def _extract_message_content(self, message):
         content_parts = []
@@ -448,13 +476,14 @@ class Weixin_Client(Chat_Client):
         return True
 
     def _remember_route(self, receiver_key, message):
-        route = {
-            'receiver_key': receiver_key,
-            'to_user_id': message.get('from_user_id'),
-            'context_token': message.get('context_token'),
-            'group_id': message.get('group_id'),
-        }
         with self._route_lock:
+            existing_route = self._routes.get(receiver_key) or self._routes.get(message.get('from_user_id'))
+            route = {
+                'receiver_key': receiver_key,
+                'to_user_id': message.get('from_user_id') or (existing_route or {}).get('to_user_id'),
+                'context_token': message.get('context_token') or (existing_route or {}).get('context_token'),
+                'group_id': message.get('group_id') if message.get('group_id') is not None else (existing_route or {}).get('group_id'),
+            }
             self._routes[receiver_key] = route
             from_user_id = message.get('from_user_id')
             if from_user_id:

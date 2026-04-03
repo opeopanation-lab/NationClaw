@@ -39,8 +39,17 @@ class FunctionHubLocal(UniInterface):
             self.gui_vlm_api_key = self.agent.config.custom_gui_vlm_key
             self.gui_vlm_name = self.agent.config.custom_gui_vlm_name
 
-        self.tavily_api_url = getattr(self.agent.config, 'tavily_api_url', 'https://api.tavily.com/search')
-        self.tavily_api_key = getattr(self.agent.config, 'tavily_api_key', None)
+        configured_tavily_api_url = getattr(self.agent.config, 'tavily_api_url', None)
+        configured_tavily_api_key = getattr(self.agent.config, 'tavily_api_key', None)
+        if configured_tavily_api_key:
+            self.tavily_api_url = configured_tavily_api_url or 'https://api.tavily.com/search'
+            self.tavily_api_key = configured_tavily_api_key
+        elif self.agent.config.wisewk_key:
+            self.tavily_api_url = 'https://wisewk.com/v1/search/'
+            self.tavily_api_key = self.agent.config.wisewk_key
+        else:
+            self.tavily_api_url = configured_tavily_api_url or 'https://api.tavily.com/search'
+            self.tavily_api_key = None
         self.tavily_search_max_results = getattr(self.agent.config, 'tavily_search_max_results', 5)
         self.tavily_search_timeout = getattr(self.agent.config, 'tavily_search_timeout', 30)
         self.save_query_for_debug = self.agent.config.save_query_for_debug
@@ -152,7 +161,7 @@ class FunctionHubLocal(UniInterface):
                     request_url,
                     headers=headers,
                     json=data,
-                    timeout=300  # 5分钟超时
+                    timeout=60  # 1分钟超时
                 )
 
                 # 记录响应状态码和内容长度
@@ -1022,6 +1031,7 @@ Please provide your answer in the exact JSON format shown above."""
 - `device.enter()`: Press Enter key
 - `device.swipe((x1, y1), (x2, y2))`: Swipe from the start point to the end point. Use this for scrolling and gesture movement on phone.
 - `device.start_app(app_name)`: Start an app
+- `device.wait()`: Wait a little bit time to perform next action.
 - `device.back()`: Press back button
 - `device.home()`: Press home button
 """ + note_actions
@@ -1063,6 +1073,7 @@ Please provide your answer in the exact JSON format shown above."""
         device_type = params['device_type']
         current_screen = params['current_screen']
         images = params.get('images', [])  # contains the screenshots from previous steps and images captured by device.take_note_screenshot()
+        screenshot_error = params.get('screenshot_error')
 
         # Extract text and medias using utility function
         # actions_text contains action history and notes
@@ -1110,13 +1121,16 @@ The following device control methods are available through the `device` object:
 ## Action History and Notes
 {actions_text if actions_text else '(No previous actions)'}
 
+## Screenshot Status
+{"Current screenshot captured successfully." if not screenshot_error else f"Failed to capture the current screenshot: {screenshot_error}. If needed, try `device.back()` or `device.home()` to switch to another interface, then continue."}
+
 ## Your Response
 
 Analyze the current screen and decide the single next device action.
 
 Your response should contain:
 1. A brief paragraph under 50 words, prefixed with "Thought:", explaining the immediate next action.
-2. A code block that performs exactly one device action, prefixed with "Action:". Coordinates scaled to 0-1000. For example: "Action: `device.click(100, 400)`".
+2. A code block that performs exactly one device action. Coordinates scaled to 0-1000. For example: ```device.click(100, 400)```
 
 Note:
 - Do not include comments in the code.
@@ -1133,17 +1147,17 @@ Note:
         if media_content_parts:
             content_parts.extend(media_content_parts)
 
-        # Add current screen screenshot
-        content_parts.append({
-            "type": "text",
-            "text": f"[Current Screen]"
-        })
-        content_parts.append({
-            "type": "image_url",
-            "image_url": {
-                "url": f"data:image/png;base64,{current_screen}"
-            }
-        })
+        if current_screen:
+            content_parts.append({
+                "type": "text",
+                "text": f"[Current Screen]"
+            })
+            content_parts.append({
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:image/png;base64,{current_screen}"
+                }
+            })
 
         messages = [{"role": "user", "content": content_parts}]
 
@@ -1244,25 +1258,26 @@ Note:
         api_docs = """
 - Messaging
   - `agent.send_message(message, receiver=None, channel=None)`: send a message to the `receiver` via `channel`. `message` can be:
-    - a string
+    - a string, representing the message text content.
     - a list mixing strings and attachment tuples
     - an attachment tuple of the form `('image', 'relative/path/to/file.png')` or `('file', 'relative/path/to/file.pdf')`
     Attachment file paths must be relative to `agent_dir`. `receiver` is the name/id. `receiver=None, channel=None` means sending to the manager, otherwise both receiver and channel should be given.
+    Note: The message content should be plain text (instead of markdown). Use emojis to prettify the message.
     Note: This API is used for sending messages through internal channels. Don't reply messages received from handle_message via do_with_device.
     Note: If you need to send images or files through chat, use `agent.send_message` with a list. Each list item can be plain text or a tuple like `('image', 'relative/path/to/file.png')` or `('file', 'relative/path/to/file.pdf')`.
 
 - AI model calling
-  - `agent.query_model(params, model_name=None)`: query the foundation model. `params` is a list of query parameters (text, image, etc.) with the same format as `send_message`. The available models can be found in `Available Models` section.
+  - `agent.query_model(params, model_name=None, with_search=False)`: query the foundation model. `params` is a list of query parameters (text, image, etc.) with the same format as `send_message`. `with_search` represents whether to search the web and generate the response based on the search results. The available models can be found in `Available Models` section.
 
 - File/memory operations for text (markdown) files. Use these APIs to fetch and maintain knowledge/memory before and after each task. When creating new files, make sure the new file is created under the agent's personal dir:
   - `agent.file.read(file_path, line_start, line_end)`: read the working directory file from line range [line_start, line_end] into the context. For example, [0, 10] means the first 11 lines and [-10, -1] means the last 10 lines. The result includes requested/actual line ranges and line numbers. Keep each read focused; usually read at most about 200 lines at a time.
   - `agent.file.write(file_path, content)`: write content to a working directory file. If the file doesn't exist, it will be created.
   - `agent.file.append(file_path, content)`: append content to the end of a working directory file. If the file doesn't exist, it will be created.
+  - `agent.file.edit(file_path, edits)`: apply sequential line-based edits to a text file and return a unified diff. Each edit is a dict like `{'op': 'insert', 'line': 3, 'content': '...'}, {'op': 'replace', 'start_line': 5, 'end_line': 7, 'content': '...'}, {'op': 'delete', 'start_line': 10, 'end_line': 12}`. Line numbers are 0-indexed and each edit uses the current file state after previous edits in the same call.
   - `agent.file.replace(file_path, match_text, replace_text)`: replace all occurrences of match_text with replace_text in a working directory file.
   - `agent.file.delete(file_path)`: delete an entire working directory file.
 - File operations for general (non-markdown) files:
-  - `agent.file.parse_file(file_path)`: parse a file to model-readable format. Supports various formats (doc, pdf, xlsx, pptx, etc.). Returns the parsed file content as a list of text and images.
-  - `agent.file.generate_file(file_path, requirement, materials)`: generate a new file for human use based on given materials. `requirement` is text description of the file to generate. `materials` is a list of text and images.
+  - `agent.read_document(document_path)`: read a document file (doc, pdf, xlsx, pptx, etc.) into markdown-like text and include it in the next step's context.
   - `agent.read_image(image_path)`: read an image file and include it in the next step's context.
 
 - Note-taking
@@ -1325,6 +1340,8 @@ Choose the next action that most reliably moves the task forward. Work in an ite
 - Use previous actions, memory, and files to avoid duplicate work.
 - If you need more information, gather it before producing content or sending messages.
 - If the task is complete or cannot proceed, call `agent.end_task('finished'/'failed'/'infeasible')`.
+- If one action needs non-trivial Python logic, write that logic directly inside the action code. You may define helper functions and call them in the same response.
+- Do not generate a Python/bash file and wait to run it later from a terminal. The agent does not have terminal command execution ability in `task_step`.
 - When any pending task from memory is actionable now, prefer doing it immediately instead of deferring it again. DO NOT ignore any pending task.
 - For long-running or multi-artifact tasks, create a dedicated task session directory under `working_memory/`, keep a `progress.md` there, and store task-specific outputs in that directory instead of the root.
 - Keep main task reasoning in `task_step`. Use `agent.do_with_device` only for short, concrete, screen-grounded subtasks.
@@ -1402,7 +1419,7 @@ Note:
 - Do not include comments in the code.
 - Each step must call exactly one `agent.*` command. Do not assign return values to variables — all return values are automatically captured in the action history.
 - If and only if no more action is needed, call `agent.end_task('finished'/'failed'/'infeasible')` to end the task.
-- Only the most recent images are included in context. To view older images referenced in the action history, use `agent.read_image(image_path)`.
+- Only the most recent images are included in context. To view older images referenced in the action history, use `agent.read_image(image_path)`. To inspect an attachment document, use `agent.read_document(document_path)`.
 - Prefer direct progress over meta-planning. Do not restate large parts of the prompt.
 
 """

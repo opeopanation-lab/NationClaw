@@ -302,7 +302,7 @@ class Lark_Client(Chat_Client):
                 'chat_lark_org_manager',
                 sender_id,
             )
-            if org_manager_set:
+            if org_manager_set and self._should_send_system_message():
                 await self._send_text_reply(self._org_manager_status_text(), message_id)
 
             # Handle commands (only from org_manager)
@@ -338,7 +338,11 @@ class Lark_Client(Chat_Client):
             # Handle the message
             if not self._should_handle_incoming(sender_id, self.org_manager_open_id, logger=logger, channel='lark'):
                 return
-            if not self._is_command_message(content) and self._ensure_report_receiver_global('lark', sender_name):
+            if (
+                not self._is_command_message(content)
+                and self._ensure_report_receiver_global('lark', sender_name)
+                and self._should_send_system_message()
+            ):
                 await self._send_text_reply(self._receiver_status_text('report', True), message_id)
             if hasattr(self.agent, 'handle_message'):
                 self.agent.handle_message(

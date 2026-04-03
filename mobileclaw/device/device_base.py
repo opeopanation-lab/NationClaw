@@ -107,34 +107,45 @@ class DeviceControllerBase(UniInterface):
                     self.agent._log_and_report('Device task interrupted because agent is stopping.', actions_and_results, task_tag=task_tag)
                     break
 
-            # Take screenshot
-            screenshot = self.take_screenshot()
-
-            model_screenshot, scale_x, scale_y = self._prepare_screenshot_for_model(screenshot)
-            self._last_model_input_scale_x = scale_x
-            self._last_model_input_scale_y = scale_y
-
-            # Save screenshot to temp file and convert to base64
-            img_byte_arr = BytesIO()
-            model_screenshot.save(img_byte_arr, format='PNG')
-            img_bytes = img_byte_arr.getvalue()
-            screenshot_base64 = base64.b64encode(img_bytes).decode('utf-8')
-            img_byte_arr.close()
-
+            screenshot = None
+            model_screenshot = None
+            screenshot_base64 = None
+            screen_path = None
+            screenshot_error = None
             try:
-                screenshots_dir = os.path.join(self.agent.file.agent_temp_dir, 'screenshots')
-                os.makedirs(screenshots_dir, exist_ok=True)
-                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                filename = f"device_step_{step}_{timestamp}.png"
-                filepath = os.path.join(screenshots_dir, filename)
-                model_screenshot.save(filepath, format='PNG')
-                screen_path = os.path.relpath(filepath, self.agent.file.agent_dir)
-            except Exception as e:
-                logger.warning(f"Failed to save screenshot to file: {e}")
-                screen_path = f"device_step_{step}_{datetime.now().strftime('%H%M%S')}"
+                screenshot = self.take_screenshot()
+                model_screenshot, scale_x, scale_y = self._prepare_screenshot_for_model(screenshot)
+                self._last_model_input_scale_x = scale_x
+                self._last_model_input_scale_y = scale_y
 
-            screenshots.append((screen_path, screenshot_base64))
-            self.agent._log_and_report(f'Step {step} Screen: {screen_path}', actions_and_results, task_tag=task_tag)
+                img_byte_arr = BytesIO()
+                model_screenshot.save(img_byte_arr, format='PNG')
+                img_bytes = img_byte_arr.getvalue()
+                screenshot_base64 = base64.b64encode(img_bytes).decode('utf-8')
+                img_byte_arr.close()
+
+                try:
+                    screenshots_dir = os.path.join(self.agent.file.agent_temp_dir, 'screenshots')
+                    os.makedirs(screenshots_dir, exist_ok=True)
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f"device_step_{step}_{timestamp}.png"
+                    filepath = os.path.join(screenshots_dir, filename)
+                    model_screenshot.save(filepath, format='PNG')
+                    screen_path = os.path.relpath(filepath, self.agent.file.agent_dir)
+                except Exception as e:
+                    logger.warning(f"Failed to save screenshot to file: {e}")
+                    screen_path = f"device_step_{step}_{datetime.now().strftime('%H%M%S')}"
+
+                screenshots.append((screen_path, screenshot_base64))
+                self.agent._log_and_report(f'Step {step} Screen: {screen_path}', actions_and_results, task_tag=task_tag)
+            except Exception as e:
+                screenshot_error = str(e)
+                logger.warning(f"Failed to capture screenshot at step {step}: {screenshot_error}")
+                self.agent._log_and_report(
+                    f'Step {step} Screenshot Error: {screenshot_error}. You may try `device.back()` or `device.home()` to switch to another screen before retrying.',
+                    actions_and_results,
+                    task_tag=task_tag
+                )
 
             # Build images from most recent step screenshots and note screenshots
             recent_screens = screenshots[-(keep_recent_images):] if keep_recent_images > 0 else screenshots
@@ -150,6 +161,7 @@ class DeviceControllerBase(UniInterface):
                 'device_type': device_type,
                 'current_screen': screenshot_base64,
                 'images': images,
+                'screenshot_error': screenshot_error,
             }
 
             # Call device_use_step API
@@ -160,7 +172,8 @@ class DeviceControllerBase(UniInterface):
                 break
 
             # Store screenshot in actions_and_results for history
-            actions_and_results.append((screen_path, screenshot_base64))
+            if screen_path and screenshot_base64:
+                actions_and_results.append((screen_path, screenshot_base64))
 
             # Add thought to results
             if thought:
@@ -304,6 +317,11 @@ class DeviceControllerBase(UniInterface):
             def home(self):
                 """Go to home"""
                 return self._device.home()
+            
+            def wait(self):
+                """Wait a little bit time"""
+                time.sleep(0.5)
+                return None
 
             def start_app(self, app_name):
                 """Start an application"""

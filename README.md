@@ -1,6 +1,6 @@
 # MobileClaw - Fully Autonomous Mobile Agent
 
-[[中文文档](README_zh.md)] | [English]
+[[中文文档](README_zh.md)] | [English] | [[X (Twitter)]](https://x.com/MobileClawX)
 
 <div align="center">
   <img src="_res/brand.png" alt="mobileclaw" width="600">
@@ -28,6 +28,8 @@ Unlike existing coding agents based on low-level system commands, third-party AP
 - We strongly suggest using **seperated app accounts** on MobileClaw-controlled devices and **DO NOT** spam the Internet.
 
 ## How to Install
+
+Download the Android APK here: [MobileClaw.apk](https://mobileclaw.cc/files/MobileClaw.apk)
 
 1. Clone this project.
 2. Run `cd MobileClaw` and `pip install -e .`

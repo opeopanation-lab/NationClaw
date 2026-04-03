@@ -193,7 +193,7 @@ class Discord_Client(Chat_Client):
             'chat_discord_org_manager',
             sender_id,
         )
-        if org_manager_set:
+        if org_manager_set and self._should_send_system_message():
             await self._send_to_channel(self._org_manager_status_text(), channel_id)
 
         # Build content from text and attachments
@@ -231,7 +231,11 @@ class Discord_Client(Chat_Client):
             return
         if not self._should_handle_incoming(sender_id, self.org_manager_user_id, logger=logger, channel='discord'):
             return
-        if not self._is_command_message(final_content) and self._ensure_report_receiver_global('discord', channel_id):
+        if (
+            not self._is_command_message(final_content)
+            and self._ensure_report_receiver_global('discord', channel_id)
+            and self._should_send_system_message()
+        ):
             await self._send_to_channel(self._receiver_status_text('report', True), channel_id)
 
         # Call agent's message handler

@@ -247,6 +247,12 @@ class Chat_Client(UniInterface):
         )
         return any(text.startswith(prefix) for prefix in command_prefixes)
 
+    def _should_send_system_message(self, triggered_by_command=False):
+        chat = getattr(self.agent, 'chat', None)
+        if chat is None or not hasattr(chat, 'should_send_system_message'):
+            return bool(triggered_by_command)
+        return bool(chat.should_send_system_message(triggered_by_command=triggered_by_command))
+
     def _set_org_manager_if_missing(self, local_attr_name, config_attr_name, sender):
         """Bind the first valid sender as org_manager when it is not configured."""
         if not sender:

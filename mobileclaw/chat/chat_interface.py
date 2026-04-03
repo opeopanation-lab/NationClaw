@@ -12,6 +12,7 @@ class Chat_Interface(UniInterface):
         self.chat_channels = agent.config.chat_channels.split(',')
         self.chat_clients = {}
         self.default_chat_channel = agent.config.default_chat_channel
+        self.verbose = bool(getattr(agent.config, 'chat_verbose', False))
         self.log_receiver = None
         self.report_receiver = None
 
@@ -113,6 +114,11 @@ class Chat_Interface(UniInterface):
             return False
         self.set_report_receiver(channel, receiver)
         return True
+
+    def should_send_system_message(self, triggered_by_command=False):
+        if triggered_by_command:
+            return True
+        return self.verbose
 
     def send_reply(self, message, previous_message, channel=None):
         """

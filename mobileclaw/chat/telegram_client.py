@@ -108,11 +108,6 @@ class Telegram_Client(Chat_Client):
         self._chat_ids = {}  # {sender_id: chat_id}
         self._chat_history = defaultdict(lambda: deque(maxlen=20))
         self._history_lock = Lock()
-        # Log receiver for send_to_log messages
-        self.log_receiver = None  # Set via /log_here command
-        # Report receiver for send_message when receiver is None
-        self.report_receiver = None  # Set via /report_here command
-
     def _set_org_manager_if_missing(self, attr_name, config_name, sender_id):
         """Persist the first Telegram sender as manager when not configured."""
         current_value = getattr(self, attr_name, None)
@@ -366,11 +361,15 @@ class Telegram_Client(Chat_Client):
             'chat_telegram_org_manager',
             sender_id,
         )
-        if org_manager_set:
+        if org_manager_set and self._should_send_system_message():
             await message.reply_text(self._org_manager_status_text())
         if not self._should_handle_incoming(sender_id, self.org_manager_user_id, logger=logger, channel='telegram'):
             return
-        if not self._is_command_message(message.text) and self._ensure_report_receiver_global('telegram', sender_id):
+        if (
+            not self._is_command_message(message.text)
+            and self._ensure_report_receiver_global('telegram', sender_id)
+            and self._should_send_system_message()
+        ):
             await message.reply_text(self._receiver_status_text('report', True))
 
         # Build content from text and/or media

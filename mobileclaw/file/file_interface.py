@@ -3,13 +3,19 @@ The interfaces to manage agent working directory stored as markdown files.
 Implements permission system based on member roles.
 """
 import os
+import json
+import time
 import threading
 import importlib.resources as pkg_resources
 import re
+import difflib
 from mobileclaw import resources
 from mobileclaw.utils.interface import UniInterface
 from mobileclaw.file.text_file import TextFile
 import structlog
+
+
+logger = structlog.get_logger(__name__)
 
 
 class FileException(Exception):
@@ -47,6 +53,8 @@ class File_Interface(UniInterface):
         # File locks for concurrent write protection
         self._file_locks = {}  # {file_path: Lock}
         self._locks_lock = threading.Lock()  # Lock for the locks dictionary itself
+        self._temp_cleanup_thread = None
+        self._temp_cleanup_stop_event = threading.Event()
 
     def _get_file_lock(self, file_path: str) -> threading.Lock:
         """
@@ -137,9 +145,99 @@ class File_Interface(UniInterface):
             # Ensure working directory exists
             os.makedirs(self.org_dir, exist_ok=True)
             self._initialize_working_dir()
+            self._start_temp_cleanup_loop()
 
     def _close(self):
-        pass
+        self._stop_temp_cleanup_loop()
+
+    def _get_temp_cleanup_interval_seconds(self) -> float:
+        retention_days = getattr(self.config, 'temp_file_retention_days', 1.0)
+        try:
+            retention_days = float(retention_days)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid temp_file_retention_days config; fallback to default",
+                value=retention_days,
+            )
+            retention_days = 1.0
+        return retention_days * 24 * 60 * 60
+
+    def _start_temp_cleanup_loop(self):
+        interval_seconds = self._get_temp_cleanup_interval_seconds()
+        if interval_seconds <= 0:
+            logger.info("Automatic temp file cleanup is disabled")
+            return
+
+        self._temp_cleanup_stop_event.clear()
+        self._cleanup_expired_temp_files()
+        self._temp_cleanup_thread = threading.Thread(
+            target=self._temp_cleanup_loop,
+            name=f"{self.agent_file_name}_temp_cleanup",
+            daemon=True,
+        )
+        self._temp_cleanup_thread.start()
+
+    def _stop_temp_cleanup_loop(self):
+        self._temp_cleanup_stop_event.set()
+        thread = self._temp_cleanup_thread
+        if thread is not None and thread.is_alive():
+            thread.join(timeout=1)
+        self._temp_cleanup_thread = None
+
+    def _temp_cleanup_loop(self):
+        interval_seconds = self._get_temp_cleanup_interval_seconds()
+        while not self._temp_cleanup_stop_event.wait(interval_seconds):
+            self._cleanup_expired_temp_files()
+
+    def _cleanup_expired_temp_files(self):
+        temp_dir = self.agent_temp_dir
+        if not os.path.isdir(temp_dir):
+            return
+
+        retention_seconds = self._get_temp_cleanup_interval_seconds()
+        if retention_seconds <= 0:
+            return
+
+        cutoff_time = time.time() - retention_seconds
+        deleted_files = 0
+        deleted_dirs = 0
+
+        try:
+            for root, dirs, files in os.walk(temp_dir, topdown=False):
+                for filename in files:
+                    file_path = os.path.join(root, filename)
+                    try:
+                        if os.path.getmtime(file_path) <= cutoff_time:
+                            os.remove(file_path)
+                            deleted_files += 1
+                    except FileNotFoundError:
+                        continue
+                    except Exception as e:
+                        logger.warning(f"Failed to remove temp file {file_path}: {e}")
+
+                for dirname in dirs:
+                    dir_path = os.path.join(root, dirname)
+                    try:
+                        if os.path.isdir(dir_path) and not os.listdir(dir_path):
+                            os.rmdir(dir_path)
+                            deleted_dirs += 1
+                    except FileNotFoundError:
+                        continue
+                    except OSError:
+                        continue
+                    except Exception as e:
+                        logger.warning(f"Failed to remove temp directory {dir_path}: {e}")
+
+            if deleted_files or deleted_dirs:
+                logger.info(
+                    "Cleaned expired temp files",
+                    temp_dir=temp_dir,
+                    deleted_files=deleted_files,
+                    deleted_dirs=deleted_dirs,
+                    retention_days=getattr(self.config, 'temp_file_retention_days', 1.0),
+                )
+        except Exception as e:
+            logger.warning(f"Temp file cleanup failed: {e}")
 
     def _query_fm(self, *args, returns=None):
         """
@@ -233,7 +331,6 @@ class File_Interface(UniInterface):
 
     def _load_embedding_cache(self):
         """Load embedding cache from file."""
-        import json
         if os.path.exists(self._embedding_cache_path):
             try:
                 with open(self._embedding_cache_path, 'r', encoding='utf-8') as f:
@@ -243,10 +340,8 @@ class File_Interface(UniInterface):
                         k: (v['mtime'], v['embedding'])
                         for k, v in cache_data.items()
                     }
-                logger = structlog.get_logger(__name__)
                 logger.debug(f"Loaded {len(self._embedding_cache)} embeddings from cache")
             except Exception as e:
-                logger = structlog.get_logger(__name__)
                 logger.warning(f"Failed to load embedding cache: {e}")
                 self._embedding_cache = {}
 
@@ -409,6 +504,39 @@ class File_Interface(UniInterface):
 
     # ==================== File Operation APIs ====================
     # These APIs are used in the code generated by file operation steps
+
+    def _normalize_text_lines(self, content: str) -> list[str]:
+        if content is None or content == '':
+            return []
+        lines = content.splitlines()
+        if content.endswith('\n'):
+            return [line + '\n' for line in lines]
+        return [line + '\n' for line in lines[:-1]] + [lines[-1]] if lines else []
+
+    def _normalize_line_index_for_edit(self, line_idx: int, line_count: int, allow_endpoint: bool = False) -> int:
+        max_idx = line_count if allow_endpoint else max(0, line_count - 1)
+        if line_idx < 0:
+            normalized = line_count + line_idx + (1 if allow_endpoint else 0)
+        else:
+            normalized = line_idx
+        if normalized < 0:
+            normalized = 0
+        if normalized > max_idx:
+            normalized = max_idx
+        return normalized
+
+    def _build_unified_diff(self, file_path: str, before_lines: list[str], after_lines: list[str]) -> str:
+        rel_path = os.path.relpath(file_path, self.agent_dir)
+        diff_lines = list(difflib.unified_diff(
+            before_lines,
+            after_lines,
+            fromfile=f"a/{rel_path}",
+            tofile=f"b/{rel_path}",
+            lineterm=''
+        ))
+        if not diff_lines:
+            return f"{rel_path}\n(no changes)"
+        return "\n".join(diff_lines)
 
     def read(self, file_path: str, line_start: int, line_end: int):
         """
@@ -837,6 +965,91 @@ class File_Interface(UniInterface):
                 logger = structlog.get_logger(__name__)
                 logger.error(f"Error removing lines from file {file_path}: {e}")
                 raise FileException(f"Failed to remove lines from file {file_path}: {e}")
+
+    def edit(self, file_path: str, edits: list[dict]):
+        """
+        Edit a text file with sequential line-based operations and return a unified diff.
+
+        Each edit is a dict with:
+        - {'op': 'insert', 'line': int, 'content': str}
+        - {'op': 'replace', 'start_line': int, 'end_line': int, 'content': str}
+        - {'op': 'delete', 'start_line': int, 'end_line': int}
+
+        Line numbers are 0-indexed and each operation is applied against the current
+        in-memory content after previous edits in the same call.
+        """
+        if not self._check_permission(file_path, 'write'):
+            raise FilePermissionError(f"Permission denied: edit({file_path})")
+
+        if not isinstance(edits, list) or not edits:
+            raise FileException("edit() requires a non-empty list of edit operations")
+
+        if not os.path.isabs(file_path):
+            file_path = os.path.join(self.agent_dir, file_path)
+
+        lock = self._get_file_lock(file_path)
+        with lock:
+            try:
+                if os.path.exists(file_path):
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        before_lines = f.readlines()
+                else:
+                    os.makedirs(os.path.dirname(file_path) or '.', exist_ok=True)
+                    before_lines = []
+
+                after_lines = before_lines[:]
+
+                for idx, edit in enumerate(edits):
+                    if not isinstance(edit, dict):
+                        raise FileException(f"Edit #{idx} must be a dict")
+
+                    op = edit.get('op')
+                    if op == 'insert':
+                        if 'line' not in edit:
+                            raise FileException(f"Edit #{idx} missing required field: line")
+                        insert_at = self._normalize_line_index_for_edit(int(edit['line']), len(after_lines), allow_endpoint=True)
+                        content_lines = self._normalize_text_lines(edit.get('content', ''))
+                        after_lines[insert_at:insert_at] = content_lines
+                    elif op == 'replace':
+                        if 'start_line' not in edit or 'end_line' not in edit:
+                            raise FileException(f"Edit #{idx} missing required fields: start_line/end_line")
+                        if not after_lines:
+                            start_idx = 0
+                            end_idx = -1
+                        else:
+                            start_idx = self._normalize_line_index_for_edit(int(edit['start_line']), len(after_lines))
+                            end_idx = self._normalize_line_index_for_edit(int(edit['end_line']), len(after_lines))
+                            if end_idx < start_idx:
+                                raise FileException(f"Edit #{idx} has end_line before start_line")
+                        content_lines = self._normalize_text_lines(edit.get('content', ''))
+                        after_lines[start_idx:end_idx + 1] = content_lines
+                    elif op == 'delete':
+                        if 'start_line' not in edit or 'end_line' not in edit:
+                            raise FileException(f"Edit #{idx} missing required fields: start_line/end_line")
+                        if after_lines:
+                            start_idx = self._normalize_line_index_for_edit(int(edit['start_line']), len(after_lines))
+                            end_idx = self._normalize_line_index_for_edit(int(edit['end_line']), len(after_lines))
+                            if end_idx < start_idx:
+                                raise FileException(f"Edit #{idx} has end_line before start_line")
+                            del after_lines[start_idx:end_idx + 1]
+                    else:
+                        raise FileException(f"Edit #{idx} has unsupported op: {op}")
+
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    f.writelines(after_lines)
+
+                diff_text = self._build_unified_diff(file_path, before_lines, after_lines)
+                rel_path = os.path.relpath(file_path, self.agent_dir)
+                return (
+                    f"{rel_path} [applied {len(edits)} edit(s), "
+                    f"lines {len(before_lines)} -> {len(after_lines)}]\n"
+                    f"{diff_text}"
+                )
+            except FileException:
+                raise
+            except Exception as e:
+                logger.error(f"Error editing file {file_path}: {e}")
+                raise FileException(f"Failed to edit file {file_path}: {e}")
     
     def read_document(self, file_name: str):
         """
@@ -845,8 +1058,14 @@ class File_Interface(UniInterface):
         :param file_name: Path to the document file
         :return: List containing text and images extracted from the document
         """
+        if not self._check_permission(file_name, 'read'):
+            raise FilePermissionError(f"Permission denied: read_document({file_name})")
+
+        if not os.path.isabs(file_name):
+            file_name = os.path.join(self.agent_dir, file_name)
+
         from markitdown import MarkItDown
-        md = MarkItDown(enable_plugins=False)
+        md = MarkItDown()
         result = md.convert(file_name)
         return [result.text_content]
 
@@ -859,7 +1078,6 @@ class File_Interface(UniInterface):
         :return: Parsed file content as a list of text and images
         """
         try:
-            # Use data interface to read document
             result = self.read_document(file_path)
             # Convert result to list format
             if isinstance(result, str):

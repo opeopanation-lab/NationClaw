@@ -156,7 +156,7 @@ class Zulip_Client(Chat_Client):
             'chat_zulip_org_manager',
             sender_email,
         )
-        if org_manager_set:
+        if org_manager_set and self._should_send_system_message():
             self.send_reply(self._org_manager_status_text(), msg)
 
         # Handle commands (only from org_manager)
@@ -185,7 +185,11 @@ class Zulip_Client(Chat_Client):
         history_content = "\n".join([f'[{m[2]}] {m[0]}: {m[1]}' for m in history_messages])
         if not self._should_handle_incoming(sender_email, self.org_manager_email, logger=logger, channel='zulip'):
             return
-        if not self._is_command_message(content) and self._ensure_report_receiver_global('zulip', sender_name_new):
+        if (
+            not self._is_command_message(content)
+            and self._ensure_report_receiver_global('zulip', sender_name_new)
+            and self._should_send_system_message()
+        ):
             self.send_reply(self._receiver_status_text('report', True), msg)
         self.agent.handle_message(content, history=history_content, sender=sender_name_new, channel='zulip')
 
