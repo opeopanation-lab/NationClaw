@@ -71,6 +71,11 @@ Visit our [project website](https://nationclaw.cc/) for details.
 3. Start your agent with `nationclaw config.yaml`.
 4. Send messages to the agent or modify its `profile.md` to customize.
 
+## Architecture
+
+- Android-side component architecture: [ANDROID_COMPONENTS.md](ANDROID_COMPONENTS.md)
+- Plugin SDK architecture: [PLUGIN_SDK.md](PLUGIN_SDK.md)
+
 ## Android Device Set Up
 
 The Android-side component architecture is documented in [ANDROID_COMPONENTS.md](ANDROID_COMPONENTS.md).
