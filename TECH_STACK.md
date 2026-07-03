@@ -229,7 +229,7 @@ Potential implementations:
 | Area | Current direction | Target direction |
 | --- | --- | --- |
 | Runtime | Python package and CLI | Python runtime with Android client bridge |
-| Android client | Prebuilt APK included | Kotlin + Jetpack Compose source-managed client |
+| Android client | Kotlin + Jetpack Compose source added in `android-client/` | Build, install, and test source-managed client on real devices |
 | AI models | OpenAI-compatible external APIs | External + local/on-device orchestration |
 | Vision | Screenshot + VLM prompting | OCR + GUI-VLM + structured screen analysis |
 | Speech | Planned architecture | Android STT/TTS components |

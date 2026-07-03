@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">NationClaw</string>
+    <string name="accessibility_service_label">NationClaw Accessibility</string>
+    <string name="notification_listener_label">NationClaw Notification Listener</string>
+</resources>

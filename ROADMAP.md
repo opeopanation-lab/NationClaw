@@ -460,15 +460,30 @@ It provides:
 
 ## Recommended immediate next step
 
+The native Android client source is now present in:
+
+```text
+android-client/
+ANDROID_CLIENT.md
+```
+
+It implements:
+
+- Kotlin + Jetpack Compose setup UI;
+- foreground WebSocket bridge service;
+- accessibility service command execution;
+- screenshot and UI hierarchy commands;
+- overlay highlight control;
+- notification listener;
+- clipboard controller;
+- package manager adapter;
+- intent dispatcher;
+- speech recognition;
+- text-to-speech;
+- MediaProjection controller.
+
 The next concrete engineering step should be:
 
 ```text
-Implement the native Android Kotlin client skeleton and align its WebSocket commands with the existing Python WebsocketController.
+Build, install, and test the Android client on a real spare Android phone, then align any command-response edge cases with Python WebsocketController.
 ```
-
-Why:
-
-- Gateway now gives Flutter/Web UI a stable target;
-- the remaining critical path is a source-managed native Android automation client;
-- the current repo only includes a prebuilt APK, so Android development cannot be audited or extended properly yet;
-- Kotlin is the right layer for Accessibility Service, Foreground Service, Media Projection, Overlay, Package Manager, Clipboard, and Intent Dispatcher.

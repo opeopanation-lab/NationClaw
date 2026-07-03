@@ -2,6 +2,8 @@
 
 This document defines the Android-side component architecture for the NationClaw / MobileClaw client app. The Python runtime communicates with the Android client through a local WebSocket bridge and expects the Android app to expose device perception, device actions, app management, and system interaction capabilities.
 
+The native Android client source is implemented under `android-client/` and documented in [ANDROID_CLIENT.md](ANDROID_CLIENT.md).
+
 ## Component tree
 
 ```text
