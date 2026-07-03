@@ -73,6 +73,8 @@ Visit our [project website](https://nationclaw.cc/) for details.
 
 ## Android Device Set Up
 
+The Android-side component architecture is documented in [ANDROID_COMPONENTS.md](ANDROID_COMPONENTS.md).
+
 1. Connect your Android device via ADB. Enable developer mode. ([How to enable developer mode?](https://www.android.com/intl/en_uk/articles/enable-android-developer-settings/))
 2. Run `adb install nationclaw/resources/apk/MobileClaw.apk` to install the Client App to your phone.
 3. Grant **Accessibility Service permission** and **Notification permission**; the WebSocket service will start automatically on the Android device.

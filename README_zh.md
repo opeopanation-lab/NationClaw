@@ -73,6 +73,8 @@ MobileClaw 的使命是在移动设备（例如你的备用手机）上实现类
 
 ## Android 设备设置
 
+Android 端组件架构请参见 [ANDROID_COMPONENTS.md](ANDROID_COMPONENTS.md)。
+
 1. 通过 ADB 连接你的 Android 设备。启用开发者模式。（[如何启用开发者模式？](https://www.android.com/intl/en_uk/articles/enable-android-developer-settings/)）
 2. 运行 `adb install nationclaw/resources/apk/MobileClaw.apk` 将客户端应用安装到你的手机。
 3. 授予**无障碍服务权限**和**通知权限**；WebSocket 服务将在 Android 设备上自动启动。
