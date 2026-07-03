@@ -77,6 +77,7 @@ Visit our [project website](https://nationclaw.cc/) for details.
 - Android-side component architecture: [ANDROID_COMPONENTS.md](ANDROID_COMPONENTS.md)
 - Plugin SDK architecture: [PLUGIN_SDK.md](PLUGIN_SDK.md)
 - Recommended technical stack: [TECH_STACK.md](TECH_STACK.md)
+- UI-to-runtime communication stack: [COMMUNICATION_STACK.md](COMMUNICATION_STACK.md)
 
 ## Android Device Set Up
 

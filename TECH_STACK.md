@@ -244,3 +244,4 @@ Potential implementations:
 - `AGENT_RUNTIME_ARCHITECTURE.md` — end-to-end runtime flow.
 - `ANDROID_COMPONENTS.md` — Android component architecture.
 - `PLUGIN_SDK.md` — plugin architecture and extension interfaces.
+- `COMMUNICATION_STACK.md` — Flutter/WebSocket/Gateway/Planner/Executor communication flow.
