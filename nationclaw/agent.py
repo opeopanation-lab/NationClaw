@@ -51,8 +51,30 @@ class AutoAgent:
         self._serve_stopped_event.set()
         self._stopping = False
         self._interfaces_closed = False
+        self._log_listeners = []
 
         self.start()
+
+    def add_log_listener(self, listener):
+        """Register a callback that receives agent log strings.
+
+        The callback is invoked with one argument: the formatted log content.
+        Listener failures are isolated so they cannot break task execution.
+        """
+        if listener not in self._log_listeners:
+            self._log_listeners.append(listener)
+
+    def remove_log_listener(self, listener):
+        """Remove a previously registered log listener."""
+        if listener in self._log_listeners:
+            self._log_listeners.remove(listener)
+
+    def _emit_log_to_listeners(self, content):
+        for listener in list(self._log_listeners):
+            try:
+                listener(content)
+            except Exception as e:
+                logger.warning(f"Agent log listener failed: {e}")
 
     def start(self):
         self.fm._open()
@@ -190,12 +212,14 @@ class AutoAgent:
             import traceback
             traceback.print_exc()
 
-        # Send to self
+        # Send to self and external listeners
         try:
             logger.info(prefixed_content)
             self.chat.send_to_log(prefixed_content)
         except Exception as e:
             logger.error(f"Error in send_to_log: {e}")
+
+        self._emit_log_to_listeners(prefixed_content)
 
     def _conclude_task(self, task, actions_and_results, _recursion_depth=0):
         """
@@ -295,7 +319,7 @@ class AutoAgent:
             return (None, [])
         return self._current_task_stack[-1]  # Return the top of the stack
 
-    def execute_task(self, task, actions_and_results=[], max_steps=30, _recursion_depth=0, mode='normal'):
+    def execute_task(self, task, actions_and_results=[], max_steps=30, _recursion_depth=0, mode='normal', cancellation_event=None):
         """
         Let the agent execute a task
         The execution process is a loop. At each step, let the model decide what actions to take next.
@@ -309,6 +333,11 @@ class AutoAgent:
                   - 'handle_message': Handle incoming messages with memory updates
                   - 'conclude_task': Save task information to knowledge and memory files
         """
+        # Optional per-task cooperative cancellation event. This is used by the Gateway
+        # to cancel running tasks without shutting down the whole agent.
+        def _task_cancelled():
+            return cancellation_event is not None and cancellation_event.is_set()
+
         # Prevent infinite recursion
         if _recursion_depth >= 6:
             logger.warning(f"Maximum recursion depth reached for task: {task}")
@@ -346,6 +375,9 @@ class AutoAgent:
             finished_step = -1
 
             for step in range(max_steps):
+                if _task_cancelled():
+                    self._log_and_report(f'{indent}Task cancelled by request.', actions_and_results, task_tag)
+                    break
                 if self._shutdown_requested():
                     self._log_and_report(f'{indent}Task interrupted because agent is stopping.', actions_and_results, task_tag)
                     break
@@ -355,9 +387,16 @@ class AutoAgent:
                     while not self._shutdown_requested():
                         if self._message_pause_event.wait(timeout=0.2):
                             break
+                    if _task_cancelled():
+                        self._log_and_report(f'{indent}Task cancelled by request.', actions_and_results, task_tag)
+                        break
                     if self._shutdown_requested():
                         self._log_and_report(f'{indent}Task interrupted because agent is stopping.', actions_and_results, task_tag)
                         break
+
+                if _task_cancelled():
+                    self._log_and_report(f'{indent}Task cancelled by request.', actions_and_results, task_tag)
+                    break
 
                 if len(actions_and_results) > self.actions_and_results_max_len:
                     actions_and_results = actions_and_results[-self.actions_and_results_max_len:]
@@ -384,6 +423,10 @@ class AutoAgent:
 
                 if self._shutdown_requested():
                     self._log_and_report(f'{indent}Task interrupted because agent is stopping.', actions_and_results, task_tag)
+                    break
+
+                if _task_cancelled():
+                    self._log_and_report(f'{indent}Task cancelled by request.', actions_and_results, task_tag)
                     break
 
                 # Add thought to results

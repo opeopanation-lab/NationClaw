@@ -438,20 +438,37 @@ Create issues from these milestones:
 19. Add speech-to-text and text-to-speech.
 20. Add release CI.
 
+## Current implementation status
+
+The first Gateway implementation is now present in:
+
+```text
+nationclaw/gateway/
+GATEWAY.md
+```
+
+It provides:
+
+- FastAPI application factory;
+- REST health, device, task, and cancellation endpoints;
+- WebSocket event handling for `task.submit` and `task.cancel`;
+- real `AutoAgent.execute_task` integration;
+- cooperative task cancellation;
+- live `agent.log` streaming over WebSocket;
+- serial task execution to avoid conflicting device actions;
+- `nationclaw-gateway` console entry point.
+
 ## Recommended immediate next step
 
 The next concrete engineering step should be:
 
 ```text
-Implement Gateway skeleton with FastAPI + WebSocket
+Implement the native Android Kotlin client skeleton and align its WebSocket commands with the existing Python WebsocketController.
 ```
 
 Why:
 
-- it gives the Flutter/Web UI a stable target;
-- it separates user interfaces from the internal agent runtime;
-- it enables task streaming, cancellation, and approvals;
-- it does not require the Android app rewrite to be complete first;
-- it can wrap the current Python runtime incrementally.
-
-After that, implement the native Android Kotlin client skeleton and align its WebSocket commands with the existing Python `WebsocketController`.
+- Gateway now gives Flutter/Web UI a stable target;
+- the remaining critical path is a source-managed native Android automation client;
+- the current repo only includes a prebuilt APK, so Android development cannot be audited or extended properly yet;
+- Kotlin is the right layer for Accessibility Service, Foreground Service, Media Projection, Overlay, Package Manager, Clipboard, and Intent Dispatcher.

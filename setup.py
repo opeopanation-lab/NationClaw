@@ -38,6 +38,7 @@ setup(
     entry_points={
         'console_scripts': [
             'nationclaw=nationclaw.main:main',
+            'nationclaw-gateway=nationclaw.gateway.app:main',
         ],
     },
     package_data={
@@ -58,5 +59,7 @@ setup(
         'qq-botpy>=1.2.0',
         'python-telegram-bot>=20.0',
         'slack_sdk',
+        'fastapi',
+        'uvicorn',
     ],
 )

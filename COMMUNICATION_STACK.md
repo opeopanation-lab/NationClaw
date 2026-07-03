@@ -377,6 +377,7 @@ This communication stack sits between the user-facing interface and the agent ru
 
 Related documents:
 
+- `GATEWAY.md` — implemented REST/WebSocket Gateway API.
 - `AGENT_RUNTIME_ARCHITECTURE.md` — end-to-end runtime flow.
 - `ANDROID_COMPONENTS.md` — Android service capabilities.
 - `PLUGIN_SDK.md` — extension model.
