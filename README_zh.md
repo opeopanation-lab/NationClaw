@@ -73,6 +73,7 @@ MobileClaw 的使命是在移动设备（例如你的备用手机）上实现类
 
 ## 架构
 
+- 端到端智能体运行时架构：[AGENT_RUNTIME_ARCHITECTURE.md](AGENT_RUNTIME_ARCHITECTURE.md)
 - Android 端组件架构：[ANDROID_COMPONENTS.md](ANDROID_COMPONENTS.md)
 - 插件 SDK 架构：[PLUGIN_SDK.md](PLUGIN_SDK.md)
 
