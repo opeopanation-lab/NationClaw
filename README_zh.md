@@ -78,6 +78,7 @@ MobileClaw 的使命是在移动设备（例如你的备用手机）上实现类
 - 插件 SDK 架构：[PLUGIN_SDK.md](PLUGIN_SDK.md)
 - 推荐技术栈：[TECH_STACK.md](TECH_STACK.md)
 - UI 到运行时通信栈：[COMMUNICATION_STACK.md](COMMUNICATION_STACK.md)
+- 实施路线图：[ROADMAP.md](ROADMAP.md)
 
 ## Android 设备设置
 
