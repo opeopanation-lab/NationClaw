@@ -3,18 +3,18 @@
 <div align="center">
 
 [![English](https://img.shields.io/badge/English-README.md-2563eb?style=flat-square)](README.md)
-[![Website](https://img.shields.io/badge/Website-mobileclaw.cc-7c3aed?style=flat-square)](https://mobileclaw.cc/)
-[![Android App](https://img.shields.io/badge/Android%20App-下载-16a34a?style=flat-square)](https://mobileclaw.cc/files/MobileClaw.apk)
+[![Website](https://img.shields.io/badge/Website-nationclaw.cc-7c3aed?style=flat-square)](https://nationclaw.cc/)
+[![Android App](https://img.shields.io/badge/Android%20App-下载-16a34a?style=flat-square)](https://nationclaw.cc/files/MobileClaw.apk)
 [![X](https://img.shields.io/badge/X-@MobileClawX-111111?style=flat-square)](https://x.com/MobileClawX)
 
 </div>
 
 <div align="center">
-  <img src="_res/brand.png" alt="mobileclaw" width="600">
+  <img src="_res/brand.png" alt="nationclaw" width="600">
 </div>
 
 <div align="center">
-  <img src="_res/mobileclaw_demo_5x.gif" alt="mobileclaw_demo" width="100%">
+  <img src="_res/nationclaw_demo_5x.gif" alt="nationclaw_demo" width="100%">
 </div>
 
 <div align="center">
@@ -51,11 +51,11 @@ MobileClaw 的使命是在移动设备（例如你的备用手机）上实现类
 
 ### 面向普通用户
 
-- 下载并安装 [MobileClaw Android app](https://mobileclaw.cc/files/MobileClaw.apk)。
+- 下载并安装 [MobileClaw Android app](https://nationclaw.cc/files/MobileClaw.apk)。
 - 完成模型与聊天通道配置。
 - 点击启动按钮即可开始使用。
 
-更多说明请访问我们的[项目网站](https://mobileclaw.cc/)。
+更多说明请访问我们的[项目网站](https://nationclaw.cc/)。
 
 ### 面向开发者
 
@@ -68,13 +68,13 @@ MobileClaw 的使命是在移动设备（例如你的备用手机）上实现类
 2. 将 `config.yaml.example` 复制为 `config.yaml` 并填写配置信息。
    1. 参见[模型配置](#模型配置)了解如何配置模型提供商。
    2. 参见[聊天应用配置](#聊天应用配置)了解如何连接聊天应用。
-3. 使用 `mobileclaw config.yaml` 启动你的智能体。
+3. 使用 `nationclaw config.yaml` 启动你的智能体。
 4. 向智能体发送消息或修改其 `profile.md` 进行个性化定制。
 
 ## Android 设备设置
 
 1. 通过 ADB 连接你的 Android 设备。启用开发者模式。（[如何启用开发者模式？](https://www.android.com/intl/en_uk/articles/enable-android-developer-settings/)）
-2. 运行 `adb install mobileclaw/resources/apk/MobileClaw.apk` 将客户端应用安装到你的手机。
+2. 运行 `adb install nationclaw/resources/apk/MobileClaw.apk` 将客户端应用安装到你的手机。
 3. 授予**无障碍服务权限**和**通知权限**；WebSocket 服务将在 Android 设备上自动启动。
 4. 在 `config.yaml` 中设置 PC 端转发端口。在 `phone_port_mappings` 中为每台设备配置独立端口，如下所示：
    ```yaml
@@ -177,7 +177,7 @@ chat_weixin_bot_token: YOUR_BOT_TOKEN  # 可选；留空则走扫码登录
   - im:message.reactions:write_only
   - im:message:send_as_bot
   - im:resource
-- 启用**长连接**模式（需要先用 lark 启动一次 mobileclaw 以建立连接）
+- 启用**长连接**模式（需要先用 lark 启动一次 nationclaw 以建立连接）
 
 **2. 在 `config.yaml` 中配置**
 ```yaml

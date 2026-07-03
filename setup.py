@@ -4,8 +4,8 @@ import glob
 import os
 
 setup(
-    name='mobileclaw',
-    packages=find_packages(include=['mobileclaw']),
+    name='nationclaw',
+    packages=find_packages(include=['nationclaw']),
     # this must be the same as the name above
     version='0.3.1',
     description='Development framework and runtime system for mobile agents.',
@@ -32,11 +32,11 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'mobileclaw=mobileclaw.main:main',
+            'nationclaw=nationclaw.main:main',
         ],
     },
     package_data={
-        'mobileclaw': [os.path.relpath(x, 'mobileclaw') for x in glob.glob('mobileclaw/resources/**/*', recursive=True)]
+        'nationclaw': [os.path.relpath(x, 'nationclaw') for x in glob.glob('nationclaw/resources/**/*', recursive=True)]
     },
     install_requires=[
         'websocket-client',

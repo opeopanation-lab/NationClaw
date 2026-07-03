@@ -2,8 +2,8 @@ import os
 import sys
 import logging
 import structlog
-from mobileclaw.agent import AutoAgent
-from mobileclaw.config import AgentConfig, CustomArgParser
+from nationclaw.agent import AutoAgent
+from nationclaw.config import AgentConfig, CustomArgParser
 
 
 def configure_logging(log_level):

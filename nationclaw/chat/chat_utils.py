@@ -5,8 +5,8 @@ import mimetypes
 import os
 import structlog
 
-from mobileclaw.utils.interface import UniInterface
-from mobileclaw.utils import debug
+from nationclaw.utils.interface import UniInterface
+from nationclaw.utils import debug
 
 logger = structlog.get_logger(__name__)
 

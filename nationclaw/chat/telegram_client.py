@@ -10,7 +10,7 @@ from pathlib import Path
 from threading import Lock, Thread
 import structlog
 
-from mobileclaw.utils.interface import UniInterface
+from nationclaw.utils.interface import UniInterface
 from .chat_utils import Chat_Client
 
 logger = structlog.get_logger(__name__)
@@ -94,7 +94,7 @@ def _markdown_to_telegram_html(text: str) -> str:
 class Telegram_Client(Chat_Client):
     def __init__(self, agent):
         super().__init__(agent)
-        from mobileclaw.agent import AutoAgent
+        from nationclaw.agent import AutoAgent
         assert isinstance(agent, AutoAgent)
         self._tag = 'chat.client.telegram'
         self.org_manager_user_id = self.agent.config.chat_telegram_org_manager

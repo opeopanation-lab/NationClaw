@@ -3,18 +3,18 @@
 <div align="center">
 
 [![中文文档](https://img.shields.io/badge/中文文档-README__zh.md-0f766e?style=flat-square)](README_zh.md)
-[![Website](https://img.shields.io/badge/Website-mobileclaw.cc-7c3aed?style=flat-square)](https://mobileclaw.cc/)
-[![Android App](https://img.shields.io/badge/Android%20App-Download-16a34a?style=flat-square)](https://mobileclaw.cc/files/MobileClaw.apk)
+[![Website](https://img.shields.io/badge/Website-nationclaw.cc-7c3aed?style=flat-square)](https://nationclaw.cc/)
+[![Android App](https://img.shields.io/badge/Android%20App-Download-16a34a?style=flat-square)](https://nationclaw.cc/files/MobileClaw.apk)
 [![X](https://img.shields.io/badge/X-@MobileClawX-111111?style=flat-square)](https://x.com/MobileClawX)
 
 </div>
 
 <div align="center">
-  <img src="_res/brand.png" alt="mobileclaw" width="600">
+  <img src="_res/brand.png" alt="nationclaw" width="600">
 </div>
 
 <div align="center">
-  <img src="_res/mobileclaw_demo_5x.gif" alt="mobileclaw_demo" width="100%">
+  <img src="_res/nationclaw_demo_5x.gif" alt="nationclaw_demo" width="100%">
 </div>
 
 <div align="center">
@@ -51,11 +51,11 @@ Unlike existing coding agents based on low-level system commands, third-party AP
 
 ### For users
 
-- Download and install the [MobileClaw Android app](https://mobileclaw.cc/files/MobileClaw.apk).
+- Download and install the [MobileClaw Android app](https://nationclaw.cc/files/MobileClaw.apk).
 - Complete the model/chat configurations.
 - Click the start button and enjoy.
 
-Visit our [project website](https://mobileclaw.cc/) for details.
+Visit our [project website](https://nationclaw.cc/) for details.
 
 ### For developers
 
@@ -68,13 +68,13 @@ Visit our [project website](https://mobileclaw.cc/) for details.
 2. Copy `config.yaml.example` to `config.yaml` and fill in information.
    1. See [Model Configuration](#model-configuration) for how to config model providers.
    2. See [Chat App Configuration](#chat-app-configuration) for how to connect chat apps.
-3. Start your agent with `mobileclaw config.yaml`.
+3. Start your agent with `nationclaw config.yaml`.
 4. Send messages to the agent or modify its `profile.md` to customize.
 
 ## Android Device Set Up
 
 1. Connect your Android device via ADB. Enable developer mode. ([How to enable developer mode?](https://www.android.com/intl/en_uk/articles/enable-android-developer-settings/))
-2. Run `adb install mobileclaw/resources/apk/MobileClaw.apk` to install the Client App to your phone.
+2. Run `adb install nationclaw/resources/apk/MobileClaw.apk` to install the Client App to your phone.
 3. Grant **Accessibility Service permission** and **Notification permission**; the WebSocket service will start automatically on the Android device.
 4. In `config.yaml`, set the port for PC-side forwarding. Configure separate ports for each device in `phone_port_mappings`, like this:
    ```yaml
@@ -177,7 +177,7 @@ chat_weixin_bot_token: YOUR_BOT_TOKEN  # Optional; omit to use QR login
   - im:message.reactions:write_only
   - im:message:send_as_bot
   - im:resource
-- Enable **Long Connection** mode (requires starting mobileclaw once with lark to establish connection)
+- Enable **Long Connection** mode (requires starting nationclaw once with lark to establish connection)
 
 **2. Configure in `config.yaml`**
 ```yaml

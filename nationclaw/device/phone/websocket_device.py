@@ -11,9 +11,9 @@ import tempfile
 import subprocess
 import re
 
-from mobileclaw.device.device_base import DeviceControllerBase
-from mobileclaw.device.phone.websocket_client import WebSocketClient
-from mobileclaw.utils.scrcpy_recorder import ScrcpyRecorder
+from nationclaw.device.device_base import DeviceControllerBase
+from nationclaw.device.phone.websocket_client import WebSocketClient
+from nationclaw.utils.scrcpy_recorder import ScrcpyRecorder
 
 logger = structlog.get_logger(__name__)
 

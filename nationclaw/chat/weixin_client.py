@@ -38,7 +38,7 @@ WEIXIN_MEDIA_TYPE_VOICE = 4
 class Weixin_Client(Chat_Client):
     def __init__(self, agent):
         super().__init__(agent)
-        from mobileclaw.agent import AutoAgent
+        from nationclaw.agent import AutoAgent
         assert isinstance(agent, AutoAgent)
         self._tag = 'chat.client.weixin'
         self.org_manager_user_id = self.agent.config.chat_weixin_org_manager
@@ -646,7 +646,7 @@ class Weixin_Client(Chat_Client):
             self._history[str(receiver_key)].append((str(sender), str(content), timestamp))
 
     def _generate_client_id(self):
-        return f'mobileclaw-weixin:{int(time.time() * 1000)}-{os.urandom(4).hex()}'
+        return f'nationclaw-weixin:{int(time.time() * 1000)}-{os.urandom(4).hex()}'
 
     def _build_outgoing_item_batches(self, message, route):
         batches = []

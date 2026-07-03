@@ -7,7 +7,7 @@ from collections import deque
 from threading import Thread
 import structlog
 
-from mobileclaw.utils.interface import UniInterface
+from nationclaw.utils.interface import UniInterface
 from .chat_utils import Chat_Client
 
 logger = structlog.get_logger(__name__)
@@ -50,7 +50,7 @@ def _make_bot_class(client: "QQ_Client") -> "type":
 class QQ_Client(Chat_Client):
     def __init__(self, agent):
         super().__init__(agent)
-        from mobileclaw.agent import AutoAgent
+        from nationclaw.agent import AutoAgent
         assert isinstance(agent, AutoAgent)
         self._tag = 'chat.client.qq'
         self.org_manager_user_id = self.agent.config.chat_qq_org_manager

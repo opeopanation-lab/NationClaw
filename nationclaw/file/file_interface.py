@@ -9,9 +9,9 @@ import threading
 import importlib.resources as pkg_resources
 import re
 import difflib
-from mobileclaw import resources
-from mobileclaw.utils.interface import UniInterface
-from mobileclaw.file.text_file import TextFile
+from nationclaw import resources
+from nationclaw.utils.interface import UniInterface
+from nationclaw.file.text_file import TextFile
 import structlog
 
 
@@ -31,7 +31,7 @@ class FilePermissionError(FileException):
 class File_Interface(UniInterface):
     def __init__(self, agent):
         super().__init__(agent)
-        from mobileclaw.agent import AutoAgent
+        from nationclaw.agent import AutoAgent
         assert isinstance(agent, AutoAgent)
         # Compute working directory as {root_dir}/{org_name}
         self.org_file_name = self._get_parsed_name(agent.org_name)

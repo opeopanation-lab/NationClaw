@@ -11,7 +11,7 @@ import structlog
 from typing import cast, Callable, Iterable, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from mobileclaw.config import AgentConfig
+from nationclaw.config import AgentConfig
 
 logger = structlog.get_logger(__name__)
 

@@ -1,18 +1,18 @@
 import sys
 import structlog
 from PIL import Image
-from mobileclaw.utils.image_utils import (
+from nationclaw.utils.image_utils import (
     resize_to_height,
     annotate_image_with_top_text,
     horizontally_concat_images,
 )
 from typing import Dict, Optional, Tuple
 
-from mobileclaw.utils.interface import UniInterface
-from mobileclaw.device.browser.browser_device import BrowserDeviceController
-from mobileclaw.device.phone.websocket_device import WebsocketController
-from mobileclaw.device.computer.mac_device import MacComputerDevice
-from mobileclaw.device.computer.windows_device import WindowsComputerDevice
+from nationclaw.utils.interface import UniInterface
+from nationclaw.device.browser.browser_device import BrowserDeviceController
+from nationclaw.device.phone.websocket_device import WebsocketController
+from nationclaw.device.computer.mac_device import MacComputerDevice
+from nationclaw.device.computer.windows_device import WindowsComputerDevice
 
 
 logger = structlog.get_logger(__name__)

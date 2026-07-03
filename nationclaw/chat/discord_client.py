@@ -29,7 +29,7 @@ MAX_ATTACHMENT_BYTES = 20 * 1024 * 1024  # 20MB
 class Discord_Client(Chat_Client):
     def __init__(self, agent):
         super().__init__(agent)
-        from mobileclaw.agent import AutoAgent
+        from nationclaw.agent import AutoAgent
         assert isinstance(agent, AutoAgent)
         self._tag = 'chat.client.discord'
         self.org_manager_user_id = self.agent.config.chat_discord_org_manager
@@ -148,9 +148,9 @@ class Discord_Client(Chat_Client):
                 "token": self.agent.config.chat_discord_token,
                 "intents": 33281,  # GUILDS | GUILD_MESSAGES | MESSAGE_CONTENT | DIRECT_MESSAGES
                 "properties": {
-                    "os": "mobileclaw",
-                    "browser": "mobileclaw",
-                    "device": "mobileclaw",
+                    "os": "nationclaw",
+                    "browser": "nationclaw",
+                    "device": "nationclaw",
                 },
             },
         }

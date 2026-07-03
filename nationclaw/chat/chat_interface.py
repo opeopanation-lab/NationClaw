@@ -1,12 +1,12 @@
 """
 The interfaces to chat with users or other agents.
 """
-from mobileclaw.utils.interface import UniInterface
+from nationclaw.utils.interface import UniInterface
 
 class Chat_Interface(UniInterface):
     def __init__(self, agent):
         super().__init__(agent)
-        from mobileclaw.agent import AutoAgent
+        from nationclaw.agent import AutoAgent
         assert isinstance(agent, AutoAgent)
         self._tag = 'chat'
         self.chat_channels = agent.config.chat_channels.split(',')

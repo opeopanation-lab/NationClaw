@@ -22,7 +22,7 @@ except ImportError:
 class WhatsApp_Client(Chat_Client):
     def __init__(self, agent):
         super().__init__(agent)
-        from mobileclaw.agent import AutoAgent
+        from nationclaw.agent import AutoAgent
         assert isinstance(agent, AutoAgent)
         self._tag = 'chat.client.whatsapp'
         self.org_manager_user_id = self.agent.config.chat_whatsapp_org_manager

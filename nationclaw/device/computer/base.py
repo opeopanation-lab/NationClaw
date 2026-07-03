@@ -1,4 +1,4 @@
-from mobileclaw.device.device_base import DeviceControllerBase
+from nationclaw.device.device_base import DeviceControllerBase
 from typing import Tuple, Optional
 import requests
 

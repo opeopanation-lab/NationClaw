@@ -20,7 +20,7 @@ except ImportError:
     zulip = None
     Image = None
 
-from mobileclaw.utils.interface import UniInterface
+from nationclaw.utils.interface import UniInterface
 from .chat_utils import Chat_Client
 
 logger = structlog.get_logger(__name__)
@@ -29,7 +29,7 @@ logger = structlog.get_logger(__name__)
 class Zulip_Client(Chat_Client):
     def __init__(self, agent):
         super().__init__(agent)
-        from mobileclaw.agent import AutoAgent
+        from nationclaw.agent import AutoAgent
         assert isinstance(agent, AutoAgent)
         self._tag = 'chat.client'
         self.org_manager_email = self.agent.config.chat_zulip_org_manager

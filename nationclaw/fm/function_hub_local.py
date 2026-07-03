@@ -779,7 +779,7 @@ next_operations = [
         returns = params.get('returns', None)  # the description of return format
 
         # Import returns parser
-        from mobileclaw.fm.returns_parser import ReturnsParser
+        from nationclaw.fm.returns_parser import ReturnsParser
         returns_parser = ReturnsParser(self.agent)
 
         # Get required values from returns specification

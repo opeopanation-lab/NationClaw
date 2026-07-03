@@ -9,7 +9,7 @@ import structlog
 import time
 import requests
 
-from mobileclaw.utils.interface import UniInterface
+from nationclaw.utils.interface import UniInterface
 from .chat_utils import Chat_Client
 
 logger = structlog.get_logger(__name__)
@@ -37,7 +37,7 @@ MSG_TYPE_MAP = {
 class Lark_Client(Chat_Client):
     def __init__(self, agent):
         super().__init__(agent)
-        from mobileclaw.agent import AutoAgent
+        from nationclaw.agent import AutoAgent
         assert isinstance(agent, AutoAgent)
         self._tag = 'chat.client.lark'
         self.org_manager_open_id = self.agent.config.chat_lark_org_manager

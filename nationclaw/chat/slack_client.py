@@ -29,7 +29,7 @@ except ImportError:
 class Slack_Client(Chat_Client):
     def __init__(self, agent):
         super().__init__(agent)
-        from mobileclaw.agent import AutoAgent
+        from nationclaw.agent import AutoAgent
         assert isinstance(agent, AutoAgent)
         self._tag = 'chat.client.slack'
         self.org_manager_user_id = self.agent.config.chat_slack_org_manager
