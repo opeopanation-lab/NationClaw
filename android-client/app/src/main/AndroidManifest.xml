@@ -8,11 +8,14 @@
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <uses-feature android:name="android.hardware.microphone" android:required="false" />
 
     <application
         android:name=".NationClawApplication"
         android:allowBackup="false"
+        android:icon="@drawable/ic_nationclaw"
         android:label="@string/app_name"
+        android:roundIcon="@drawable/ic_nationclaw"
         android:theme="@style/AppTheme">
 
         <activity
@@ -27,7 +30,11 @@
         <service
             android:name=".service.NationClawForegroundService"
             android:exported="false"
-            android:foregroundServiceType="specialUse" />
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Local automation bridge for user-controlled Android accessibility actions" />
+        </service>
 
         <service
             android:name=".accessibility.NationClawAccessibilityService"
