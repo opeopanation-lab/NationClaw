@@ -127,5 +127,3 @@ class AppStoreBridge:
         except Exception as e:
             logger.error(f"Install failed: {e}")
             return False
-APPEOF`
-echo "✓ Created nationclaw/app_store/bridge.py"

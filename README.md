@@ -14,7 +14,7 @@
 </div>
 
 <div align="center">
-  <img src="_res/nationclaw_demo_5x.gif" alt="nationclaw_demo" width="100%">
+  <img src="_res/mobileclaw_demo_5x.gif" alt="mobileclaw_demo" width="100%">
 </div>
 
 <div align="center">
@@ -60,7 +60,7 @@ Visit our [project website](https://nationclaw.cc/) for details.
 ### For developers
 
 1. Clone this project into your development environment.
-2. Run `cd MobileClaw` and `pip install -e .`
+2. Run `cd NationClaw` and `pip install -e .`
 
 ## How to Use
 

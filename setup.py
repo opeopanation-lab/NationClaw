@@ -5,15 +5,15 @@ import os
 
 setup(
     name='nationclaw',
-    packages=find_packages(include=['nationclaw']),
+    packages=find_packages(include=['nationclaw', 'nationclaw.*']),
     # this must be the same as the name above
     version='0.3.1',
     description='Development framework and runtime system for mobile agents.',
     author='MobileClaw Team',
-    license='CUSTOM',
+    license='MIT',
     author_email='li.yuanchun@foxmail.com',
-    url='https://github.com/MobileClaw/MobileClaw',  # use the URL to the github repo
-    download_url='https://github.com/MobileClaw/MobileClaw/tarball/0.3.1',
+    url='https://github.com/opeopanation-lab/NationClaw',  # use the URL to the github repo
+    download_url='https://github.com/opeopanation-lab/NationClaw/tarball/0.3.1',
     keywords=['AI', 'agent', 'mobile', 'framework', 'LLM'],  # arbitrary keywords
     classifiers=[
         # How mature is this project? Common values are
@@ -29,7 +29,12 @@ setup(
         # Specify the Python versions you support here. In particular, ensure
         # that you indicate whether you support Python 2, Python 3 or both.
         'Programming Language :: Python',
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
     ],
+    python_requires='>=3.10',
     entry_points={
         'console_scripts': [
             'nationclaw=nationclaw.main:main',
@@ -40,14 +45,18 @@ setup(
     },
     install_requires=[
         'websocket-client',
+        'websockets',
         "structlog",
         "markitdown",
         'pyyaml',
         "Pillow",
         "cryptography",
+        'requests',
+        'numpy',
         'zulip',
         'lark_oapi',
         'qq-botpy>=1.2.0',
         'python-telegram-bot>=20.0',
+        'slack_sdk',
     ],
 )

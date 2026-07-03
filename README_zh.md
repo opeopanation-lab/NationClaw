@@ -14,7 +14,7 @@
 </div>
 
 <div align="center">
-  <img src="_res/nationclaw_demo_5x.gif" alt="nationclaw_demo" width="100%">
+  <img src="_res/mobileclaw_demo_5x.gif" alt="mobileclaw_demo" width="100%">
 </div>
 
 <div align="center">
@@ -60,7 +60,7 @@ MobileClaw 的使命是在移动设备（例如你的备用手机）上实现类
 ### 面向开发者
 
 1. 克隆本项目。
-2. 运行 `cd MobileClaw` 和 `pip install -e .`
+2. 运行 `cd NationClaw` 和 `pip install -e .`
 
 ## 使用方法
 

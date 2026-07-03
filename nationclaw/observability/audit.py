@@ -130,5 +130,3 @@ class TrustScorer:
         
         success_rate = sum(1 for h in history if h) / len(history)
         self.trust_scores[action] = success_rate
-AUDITEOF`
-echo "✓ Created nationclaw/observability/audit.py"
