@@ -76,6 +76,7 @@ Visit our [project website](https://nationclaw.cc/) for details.
 - End-to-end agent runtime architecture: [AGENT_RUNTIME_ARCHITECTURE.md](AGENT_RUNTIME_ARCHITECTURE.md)
 - Android-side component architecture: [ANDROID_COMPONENTS.md](ANDROID_COMPONENTS.md)
 - Plugin SDK architecture: [PLUGIN_SDK.md](PLUGIN_SDK.md)
+- Recommended technical stack: [TECH_STACK.md](TECH_STACK.md)
 
 ## Android Device Set Up
 
